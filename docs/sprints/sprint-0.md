@@ -30,8 +30,8 @@ These activities begin in later sprints after the analysis baseline is completed
 
 | ID | Task | Status |
 |---|---|---|
-| QCL-001 | Review System Overview | In Progress |
-| QCL-002 | Review Authentication Requirements | To Do |
+| QCL-001 | Review System Overview | Done |
+| QCL-002 | Review Authentication Requirements | In Progress |
 | QCL-003 | Review Product Requirements | To Do |
 | QCL-004 | Review Order Requirements | To Do |
 | QCL-005 | Review Invoice Requirements | To Do |
