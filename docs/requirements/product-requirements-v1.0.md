@@ -12,12 +12,12 @@ The v0.9 document remains unchanged as the original review baseline.
 
 ### Registration
 
-- **REQ-AUTH-001:** The system shall allow a new customer to register using First Name, Last Name, Email and Password.
-- **REQ-AUTH-002:** First Name and Last Name shall contain between 1 and 50 characters.
-- **REQ-AUTH-003:** First Name and Last Name may contain Arabic or English letters, spaces, hyphens and apostrophes. Numeric-only names and unsupported symbols shall be rejected.
-- **REQ-AUTH-004:** Email addresses shall use a valid email format.
+- **REQ-AUTH-001:** The system shall allow a new customer to register using the required fields First Name, Last Name, Email and Password.
+- **REQ-AUTH-002:** First Name and Last Name are required and shall contain between 1 and 50 characters.
+- **REQ-AUTH-003:** First Name and Last Name shall support Arabic or English letters only in Version 1. Spaces, hyphens and apostrophes are allowed. Numeric-only names, unsupported symbols and letters/scripts from other languages shall be rejected.
+- **REQ-AUTH-004:** Email is required and shall use a valid email format.
 - **REQ-AUTH-005:** Customer email addresses shall be unique using case-insensitive comparison. For uniqueness purposes, `User@test.com` and `user@test.com` represent the same email address.
-- **REQ-AUTH-006:** Passwords shall contain between 8 and 64 characters and include at least one uppercase letter, one lowercase letter, one number and one special character.
+- **REQ-AUTH-006:** Password is required and shall contain between 8 and 64 characters and include at least one uppercase letter, one lowercase letter, one number and one special character.
 - **REQ-AUTH-007:** A newly registered customer account shall use status `PENDING_VERIFICATION` until email verification succeeds.
 - **REQ-AUTH-008:** A customer shall not be automatically authenticated before email verification is completed.
 - **REQ-AUTH-009:** After successful email verification, the account status shall become `ACTIVE`.
