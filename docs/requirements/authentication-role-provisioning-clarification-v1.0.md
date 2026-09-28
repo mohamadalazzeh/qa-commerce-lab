@@ -22,7 +22,7 @@ The user role is stored and controlled by the backend. A client must not be able
 
 ---
 
-## 2. Customer Registration
+## 2. Customer Self-Registration
 
 - Public registration creates `CUSTOMER` accounts only.
 - The public registration endpoint must not allow the caller to select `ADMIN` as the account role.
@@ -42,7 +42,44 @@ Public Registration
 
 ---
 
-## 3. Initial Administrator Bootstrap
+## 3. Administrator-Created Customer Accounts
+
+An authenticated and authorized Administrator may also initiate creation of a new Customer account through an Administrator-only account-management API.
+
+Business rules:
+
+- Only an authenticated and authorized `ADMIN` may initiate this flow.
+- A `CUSTOMER` must not be able to use the Administrator customer-creation operation.
+- The Administrator supplies the customer's required profile data such as First Name, Last Name and Email.
+- The Administrator does not choose or know the Customer's password.
+- The backend assigns `role = CUSTOMER`; the role is not accepted from an untrusted client field.
+- The account starts in `PENDING_VERIFICATION` / pending activation state and must not receive normal authenticated Customer access until activation is completed.
+- The system sends a secure, time-limited, one-time activation invitation to the Customer's email address.
+- The invited Customer chooses their own password while accepting the activation invitation.
+- The new password must satisfy the same Customer password policy used by public registration.
+- Successful activation establishes control of the email address and changes the account to `ACTIVE`.
+- Used, invalid, expired or revoked activation invitations must not activate the account.
+- Case-insensitive email uniqueness rules apply exactly as they do for public registration.
+- Attempting to create a Customer using an email already associated with an account must follow the duplicate-email behavior defined in the API contract.
+
+Conceptual flow:
+
+```text
+Existing ADMIN
+→ Create Customer Account / Invitation
+→ Backend provisions CUSTOMER as PENDING_VERIFICATION
+→ Activation invitation sent to target email
+→ Customer opens valid invitation
+→ Customer chooses own password
+→ Email ownership / activation completed
+→ Account becomes ACTIVE
+```
+
+This flow is intentionally separate from public self-registration so QA can validate Administrator authorization, account provisioning, activation, email uniqueness and privilege boundaries.
+
+---
+
+## 4. Initial Administrator Bootstrap
 
 The first Administrator cannot depend on an existing Administrator account. It is created during secure environment/bootstrap setup rather than through public registration.
 
@@ -72,7 +109,7 @@ The bootstrap process may be implemented through an application seed/bootstrap c
 
 ---
 
-## 4. Additional Administrator Provisioning
+## 5. Additional Administrator Provisioning
 
 Additional Administrator accounts are created through an authenticated administrative invitation workflow rather than public self-registration.
 
@@ -103,28 +140,31 @@ Existing ADMIN
 
 ---
 
-## 5. Direct Database Creation
+## 6. Direct Database Creation
 
-Creating an Administrator directly through PostgreSQL is technically possible for controlled development, testing, or emergency maintenance, but it is not the normal supported account-provisioning workflow.
+Creating an Administrator or Customer directly through PostgreSQL is technically possible for controlled development, testing, or emergency maintenance, but it is not the normal supported account-provisioning workflow.
 
 Normal production-style flows are:
 
 ```text
+Customer self-registration
+→ public registration
+
+Admin-created Customer
+→ authenticated Administrator customer-provisioning flow
+
 First ADMIN
 → secure bootstrap/seed
 
 Additional ADMIN
 → authenticated Admin invitation workflow
-
-CUSTOMER
-→ public registration
 ```
 
-Any controlled database setup used for testing must preserve application security requirements such as password hashing, role values, account status, and required authentication state.
+Any controlled database setup used for testing must preserve application security requirements such as password hashing, role values, account status, email uniqueness and required authentication/activation state.
 
 ---
 
-## 6. Authorization Expectations
+## 7. Authorization Expectations
 
 The backend shall use the authenticated user's role when authorizing protected operations.
 
@@ -143,28 +183,37 @@ Hiding an administrative control in a UI is not sufficient authorization. Role e
 
 ---
 
-## 7. Authentication API QA Scope
+## 8. Authentication API QA Scope
 
 During the Authentication API testing phase, QA will include coverage for the role-provisioning behavior defined here, including:
 
+- Customer public self-registration.
+- Verifying that public registration cannot self-assign the `ADMIN` role.
+- Administrator creation/initiation of a Customer account.
+- Customer activation after Administrator-initiated provisioning.
+- Verifying that a Customer cannot use the Administrator customer-creation operation.
+- Duplicate-email handling for Administrator-created Customers.
+- Invalid, expired, reused and revoked Customer activation invitations after the final API contract is agreed.
 - Initial Administrator bootstrap behavior.
 - Administrator first-login restrictions.
 - Administrator authentication and mandatory 2FA behavior.
 - Creating/inviting an additional Administrator through an authorized Administrator flow.
 - Verifying that a Customer cannot create or invite an Administrator.
-- Verifying that public registration cannot self-assign the `ADMIN` role.
-- Invitation expiration, invalidation, and one-time-use behavior after the final API contract is agreed.
+- Invalid, expired, reused and revoked Administrator invitation behavior after the final API contract is agreed.
 
 Detailed test cases will be derived after the Authentication API contract is reviewed and frozen.
 
 ---
 
-## 8. Items to Finalize During API Contract Review
+## 9. Items to Finalize During API Contract Review
 
 The following details will be finalized while reviewing the Authentication API contract:
 
-1. Exact endpoint names and request/response structures for Administrator invitations and invitation acceptance.
-2. Invitation lifetime and resend/revocation rules.
-3. Behavior when an invitation targets an email that already belongs to an existing account.
-4. Exact pre-authentication flow for mandatory first-password change and Administrator 2FA enrollment.
-5. Exact Administrator 2FA delivery and recovery mechanism.
+1. Exact endpoint and request/response contract for Administrator-created Customer accounts.
+2. Customer activation-invitation lifetime and resend/revocation rules.
+3. Duplicate-email response when an Administrator attempts to create a Customer whose email already exists.
+4. Exact endpoint names and request/response structures for Administrator invitations and invitation acceptance.
+5. Administrator invitation lifetime and resend/revocation rules.
+6. Behavior when an Administrator invitation targets an email that already belongs to an existing account.
+7. Exact pre-authentication flow for mandatory first-password change and Administrator 2FA enrollment.
+8. Exact Administrator 2FA delivery and recovery mechanism.
