@@ -18,23 +18,47 @@ CUSTOMER
 ADMIN
 ```
 
-The user role is stored and controlled by the backend. A client must not be able to grant itself an elevated role by submitting a role value in a public request.
+The user role is stored and controlled by the backend.
+
+### Approved Role-Provisioning Principle
+
+Normal account-creation requests shall not use a generic client-supplied `role` field to decide whether an account becomes a Customer or Administrator. The backend determines the role from the authorized workflow / endpoint being used.
+
+Approved mapping:
+
+```text
+Public Customer Registration
+→ role = CUSTOMER
+
+Administrator Customer Provisioning
+→ role = CUSTOMER
+
+Initial Administrator Bootstrap
+→ role = ADMIN
+
+Administrator Invitation Workflow
+→ role = ADMIN
+```
+
+This prevents public callers from selecting privileged roles and keeps Customer and Administrator lifecycle rules separate.
 
 ---
 
 ## 2. Customer Self-Registration
 
-- Public registration creates `CUSTOMER` accounts only.
-- The public registration endpoint must not allow the caller to select `ADMIN` as the account role.
+Public self-registration creates `CUSTOMER` accounts only.
+
+- The public registration request does not contain a `role` field.
 - The backend assigns `role = CUSTOMER` during successful public registration.
+- A caller must not be able to self-assign `ADMIN`, administrative status values, or other privileged account attributes.
+- If the public registration request includes unsupported privileged fields such as `role`, `status`, `isAdmin`, or equivalent fields, the API shall reject the request according to the validation policy defined in the final API contract.
 - A newly registered customer starts with `status = PENDING_VERIFICATION` and follows the normal email-verification workflow before becoming `ACTIVE`.
-- Client-supplied privileged account fields such as `role` or administrative status values must not result in privilege escalation.
 
 Conceptual flow:
 
 ```text
 Public Registration
-→ CUSTOMER
+→ Backend assigns CUSTOMER
 → PENDING_VERIFICATION
 → Email Verification
 → ACTIVE
@@ -44,15 +68,25 @@ Public Registration
 
 ## 3. Administrator-Created Customer Accounts
 
-An authenticated and authorized Administrator may also initiate creation of a new Customer account through an Administrator-only account-management API.
+An authenticated and authorized Administrator may initiate creation of a new Customer account through a Customer-specific Administrator API.
+
+The approved design is role-specific rather than a generic `/admin/users` request containing a caller-selected role.
+
+Conceptual API responsibility:
+
+```text
+Administrator Customer-Provisioning Endpoint
+→ Backend assigns CUSTOMER
+```
 
 Business rules:
 
 - Only an authenticated and authorized `ADMIN` may initiate this flow.
 - A `CUSTOMER` must not be able to use the Administrator customer-creation operation.
 - The Administrator supplies the customer's required profile data such as First Name, Last Name and Email.
+- The request does not need a `role` field because the Customer-provisioning workflow itself defines the account type.
 - The Administrator does not choose or know the Customer's password.
-- The backend assigns `role = CUSTOMER`; the role is not accepted from an untrusted client field.
+- The backend assigns `role = CUSTOMER`.
 - The account starts in `PENDING_VERIFICATION` / pending activation state and must not receive normal authenticated Customer access until activation is completed.
 - The system sends a secure, time-limited, one-time activation invitation to the Customer's email address.
 - The invited Customer chooses their own password while accepting the activation invitation.
@@ -66,7 +100,7 @@ Conceptual flow:
 
 ```text
 Existing ADMIN
-→ Create Customer Account / Invitation
+→ Customer-specific Admin endpoint
 → Backend provisions CUSTOMER as PENDING_VERIFICATION
 → Activation invitation sent to target email
 → Customer opens valid invitation
@@ -75,7 +109,7 @@ Existing ADMIN
 → Account becomes ACTIVE
 ```
 
-This flow is intentionally separate from public self-registration so QA can validate Administrator authorization, account provisioning, activation, email uniqueness and privilege boundaries.
+This flow is intentionally separate from public self-registration and Administrator provisioning so QA can validate authorization, activation, email uniqueness and privilege boundaries independently.
 
 ---
 
@@ -98,7 +132,7 @@ Conceptual bootstrap flow:
 Environment configuration
 → Database migrations
 → Initial admin bootstrap/seed
-→ ADMIN account exists
+→ Backend provisions ADMIN
 → First sign-in
 → Mandatory password change
 → Required 2FA enrollment/verification
@@ -111,29 +145,38 @@ The bootstrap process may be implemented through an application seed/bootstrap c
 
 ## 5. Additional Administrator Provisioning
 
-Additional Administrator accounts are created through an authenticated administrative invitation workflow rather than public self-registration.
+Additional Administrator accounts are created through a dedicated authenticated Administrator invitation workflow rather than public self-registration or a generic user-creation request with a client-selected role.
+
+Conceptual API responsibility:
+
+```text
+Administrator Invitation Endpoint
+→ Backend assigns ADMIN
+```
 
 Business rules:
 
 - Only an authenticated and authorized `ADMIN` may initiate an invitation for another Administrator.
 - A `CUSTOMER` must not be able to create or invite an Administrator.
-- The inviting Administrator supplies the target email address; the inviting Administrator does not choose or know the invited Administrator's password.
+- The invitation request does not need a generic `role` field because the Administrator-invitation workflow itself defines the account type.
+- The inviting Administrator supplies the target email address and required profile data.
+- The inviting Administrator does not choose or know the invited Administrator's password.
 - The system sends a secure, time-limited, one-time invitation to the target email address.
 - The invited person chooses their own password while accepting the invitation.
-- The Administrator role is assigned by the backend based on the authorized invitation; it is not accepted from an untrusted public registration field.
+- The backend provisions `role = ADMIN` only after the request has passed the required authorization and invitation workflow.
 - A successfully accepted email invitation establishes control of the invited email address.
 - The invited Administrator must complete required 2FA enrollment/verification before normal privileged access is granted.
-- Used, invalid, expired, or revoked invitations must not create an Administrator account.
+- Used, invalid, expired, or revoked invitations must not create or activate an Administrator account.
 
 Conceptual flow:
 
 ```text
 Existing ADMIN
-→ Create Admin Invitation
+→ Administrator-specific invitation endpoint
 → Invitation sent to target email
 → Invitee opens valid invitation
 → Invitee chooses own password
-→ Backend provisions ADMIN role
+→ Backend provisions ADMIN
 → Required 2FA enrollment/verification
 → Administrator account ready for privileged access
 ```
@@ -149,15 +192,19 @@ Normal production-style flows are:
 ```text
 Customer self-registration
 → public registration
+→ CUSTOMER
 
 Admin-created Customer
-→ authenticated Administrator customer-provisioning flow
+→ Customer-specific Administrator provisioning flow
+→ CUSTOMER
 
 First ADMIN
 → secure bootstrap/seed
+→ ADMIN
 
 Additional ADMIN
-→ authenticated Admin invitation workflow
+→ Administrator-specific invitation flow
+→ ADMIN
 ```
 
 Any controlled database setup used for testing must preserve application security requirements such as password hashing, role values, account status, email uniqueness and required authentication/activation state.
@@ -166,7 +213,7 @@ Any controlled database setup used for testing must preserve application securit
 
 ## 7. Authorization Expectations
 
-The backend shall use the authenticated user's role when authorizing protected operations.
+The backend shall use the authenticated user's stored role when authorizing protected operations.
 
 Examples:
 
@@ -181,6 +228,8 @@ ADMIN token
 
 Hiding an administrative control in a UI is not sufficient authorization. Role enforcement must occur on the backend.
 
+The API caller does not become an Administrator merely by submitting a role-like field. Administrator privilege is established only through an authorized Administrator provisioning workflow or the initial secure bootstrap process.
+
 ---
 
 ## 8. Authentication API QA Scope
@@ -188,8 +237,9 @@ Hiding an administrative control in a UI is not sufficient authorization. Role e
 During the Authentication API testing phase, QA will include coverage for the role-provisioning behavior defined here, including:
 
 - Customer public self-registration.
-- Verifying that public registration cannot self-assign the `ADMIN` role.
-- Administrator creation/initiation of a Customer account.
+- Verifying that the public registration contract does not expose role selection.
+- Verifying that public registration cannot self-assign the `ADMIN` role through unexpected fields.
+- Administrator creation/initiation of a Customer account through the Customer-specific Administrator flow.
 - Customer activation after Administrator-initiated provisioning.
 - Verifying that a Customer cannot use the Administrator customer-creation operation.
 - Duplicate-email handling for Administrator-created Customers.
@@ -197,9 +247,11 @@ During the Authentication API testing phase, QA will include coverage for the ro
 - Initial Administrator bootstrap behavior.
 - Administrator first-login restrictions.
 - Administrator authentication and mandatory 2FA behavior.
-- Creating/inviting an additional Administrator through an authorized Administrator flow.
+- Creating/inviting an additional Administrator through the Administrator-specific invitation flow.
 - Verifying that a Customer cannot create or invite an Administrator.
+- Verifying that the Admin invitation contract does not depend on a caller-supplied generic role value.
 - Invalid, expired, reused and revoked Administrator invitation behavior after the final API contract is agreed.
+- Database verification that accounts created through each workflow contain the expected backend-assigned role.
 
 Detailed test cases will be derived after the Authentication API contract is reviewed and frozen.
 
@@ -215,5 +267,6 @@ The following details will be finalized while reviewing the Authentication API c
 4. Exact endpoint names and request/response structures for Administrator invitations and invitation acceptance.
 5. Administrator invitation lifetime and resend/revocation rules.
 6. Behavior when an Administrator invitation targets an email that already belongs to an existing account.
-7. Exact pre-authentication flow for mandatory first-password change and Administrator 2FA enrollment.
-8. Exact Administrator 2FA delivery and recovery mechanism.
+7. Exact validation response for unexpected privileged fields submitted to public registration.
+8. Exact pre-authentication flow for mandatory first-password change and Administrator 2FA enrollment.
+9. Exact Administrator 2FA delivery and recovery mechanism.
