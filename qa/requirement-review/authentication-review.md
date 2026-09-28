@@ -1,7 +1,7 @@
 # Authentication Requirement Review
 
 **Task:** QCL-002 — Review Authentication Requirements  
-**Requirements Version:** `v0.9`  
+**Requirements Version:** `v0.9` baseline with approved v1.0 clarifications  
 **Environment:** QA  
 **Build:** `0.9.0-RC1`  
 **Status:** In Progress
@@ -17,6 +17,11 @@ Requirements reviewed:
 - `REQ-AUTH-005`
 - `REQ-AUTH-006`
 - `REQ-AUTH-007`
+
+Later Authentication clarifications are maintained in:
+
+- `docs/requirements/product-requirements-v1.0.md`
+- `docs/requirements/authentication-role-provisioning-clarification-v1.0.md`
 
 ## Open Questions / Clarifications
 
@@ -55,6 +60,36 @@ These questions are outside the core Authentication scope and will be carried in
 4. What permissions does an administrator have over customer orders?
 5. Which order operations are restricted by role or ownership?
 
+## Resolved Clarification — Customer vs Administrator Provisioning
+
+A requirement gap was identified during Authentication review: the original requirements referred to Customers and Administrators but did not explicitly define how each role is provisioned.
+
+The approved clarification is:
+
+- Public registration creates `CUSTOMER` accounts only.
+- The backend assigns the Customer role; public callers cannot self-assign `ADMIN`.
+- The first Administrator is created through secure environment bootstrap/seed configuration.
+- Initial Administrator bootstrap is idempotent and must not create duplicate Administrator accounts when setup is rerun.
+- The initial Administrator uses a temporary password and must change it before normal privileged access is granted.
+- Administrator 2FA is mandatory before normal privileged access.
+- Additional Administrators are provisioned through an authenticated Administrator invitation workflow.
+- The inviting Administrator does not choose or know the invited Administrator's password.
+- The invited Administrator chooses their own password and completes the required 2FA flow.
+- Direct SQL insertion is not the normal supported Administrator-provisioning workflow.
+
+Detailed requirements and the planned QA scope are documented in `docs/requirements/authentication-role-provisioning-clarification-v1.0.md`.
+
+## Planned Authentication API QA Coverage
+
+After the Authentication API contract is reviewed and frozen, QA coverage will include:
+
+- Customer public registration and prevention of Admin self-assignment.
+- Initial Administrator bootstrap and first-login restrictions.
+- Administrator login and required 2FA.
+- Authorized Administrator invitation of another Administrator.
+- Customer attempts to access Administrator-provisioning operations.
+- Invalid, expired, reused and revoked Administrator invitation behavior after the contract details are finalized.
+
 ## QA Notes
 
-No test cases should be finalized from unresolved items in this review. Open questions must be clarified and incorporated into a revised requirements baseline before detailed test design begins.
+No detailed test cases should be finalized from unresolved items in this review. Open questions must be clarified and incorporated into the agreed requirements/API baseline before detailed test design begins.
