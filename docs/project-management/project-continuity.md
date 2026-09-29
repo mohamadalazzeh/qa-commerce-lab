@@ -327,6 +327,76 @@ The public QA repository should contain requirements, API contracts, QA artifact
 
 ---
 
+## Backend Engineering and Clean-Code Standard
+
+When backend implementation begins, the backend source code must also be maintained in GitHub and treated as a real software project rather than disposable demo code.
+
+Expected engineering standards:
+
+- TypeScript strict typing where practical.
+- Clear module boundaries by business domain.
+- Thin Routes and Controllers.
+- Business rules live primarily in Services.
+- Database access is isolated in Repositories.
+- Request validation is separated from Controllers.
+- Authentication and Authorization are enforced through dedicated middleware/services.
+- Centralized error handling and consistent API error responses.
+- No hard-coded secrets, passwords, tokens, connection strings or environment-specific credentials.
+- Environment configuration is loaded from environment variables with a safe `.env.example`.
+- Secure password hashing and token handling.
+- Database migrations and controlled seed/bootstrap scripts.
+- Proper transactions for multi-step business operations.
+- Reusable utilities only when they remove real duplication; avoid unnecessary abstractions.
+- Meaningful names, small focused functions and minimal duplicated logic.
+- ESLint / formatting standards should be applied consistently.
+- OpenAPI contract and implementation should remain aligned.
+- Important backend behavior should have automated developer-level tests where appropriate, while QA testing remains independent.
+- Docker setup must allow the full environment to be started consistently.
+
+Target module structure:
+
+```text
+src/
+├── config/
+├── db/
+│   ├── migrations/
+│   └── seeds/
+├── modules/
+│   ├── auth/
+│   │   ├── auth.routes.ts
+│   │   ├── auth.controller.ts
+│   │   ├── auth.service.ts
+│   │   ├── auth.repository.ts
+│   │   ├── auth.validation.ts
+│   │   └── auth.types.ts
+│   ├── users/
+│   ├── products/
+│   ├── cart/
+│   ├── inventory/
+│   ├── orders/
+│   ├── invoices/
+│   ├── returns/
+│   ├── payments/
+│   └── bulk-import/
+├── middleware/
+├── services/
+├── utils/
+├── app.ts
+└── server.ts
+```
+
+Backend repository strategy:
+
+- The backend should be version-controlled in GitHub.
+- If seeded implementation defects are intentionally hidden from students or public portfolio readers, keep the source in a private backend repository and expose a runnable Docker image or controlled environment to the public QA project.
+- The public QA repository must not contain a hidden-bug answer key.
+- Commit history should remain readable and professional.
+- Backend implementation decisions should be documented enough that the project can continue across future work sessions.
+
+Before considering the backend complete, perform a code-quality review for architecture, naming, duplication, error handling, security, database consistency and contract alignment.
+
+---
+
 ## Next Step
 
 Continue the Authentication module with:
