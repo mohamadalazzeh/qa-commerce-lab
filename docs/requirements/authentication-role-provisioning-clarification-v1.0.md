@@ -109,8 +109,6 @@ Existing ADMIN
 → Account becomes ACTIVE
 ```
 
-This flow is intentionally separate from public self-registration and Administrator provisioning so QA can validate authorization, activation, email uniqueness and privilege boundaries independently.
-
 ---
 
 ## 4. Initial Administrator Bootstrap
@@ -121,10 +119,13 @@ The initial Administrator bootstrap shall follow these rules:
 
 - Initial Administrator credentials are provided through secure environment configuration rather than hard-coded source code.
 - The bootstrap process creates the initial account with `role = ADMIN`.
-- The bootstrap process must be idempotent: rerunning the environment setup must not create duplicate initial Administrator accounts.
-- The initial password is treated as temporary and the initial Administrator must change it before receiving normal privileged access.
-- Administrator 2FA remains mandatory. Full privileged access must not be granted until the required Administrator 2FA enrollment/verification flow is completed.
-- The exact Administrator 2FA delivery and recovery mechanism remains an open item until the Authentication API contract is finalized.
+- The bootstrap process must be idempotent: rerunning environment setup must not create duplicate initial Administrator accounts.
+- The initial password is temporary.
+- The initial Administrator must replace the temporary password during the first successful sign-in flow before receiving normal privileged access.
+- After a successful first-password change, the original temporary password becomes invalid.
+- The implementation may use a persisted state such as `must_change_password = true` until the password replacement succeeds.
+- Administrator second-step verification is mandatory and uses a six-digit code delivered to the Administrator's email address.
+- Access Token and Refresh Token must not be issued until all required first-sign-in steps have completed.
 
 Conceptual bootstrap flow:
 
@@ -132,14 +133,16 @@ Conceptual bootstrap flow:
 Environment configuration
 → Database migrations
 → Initial admin bootstrap/seed
-→ Backend provisions ADMIN
-→ First sign-in
+→ Backend provisions ADMIN with temporary password
+→ First sign-in credentials accepted
+→ Email OTP challenge
+→ OTP verified
 → Mandatory password change
-→ Required 2FA enrollment/verification
-→ Privileged administrator session
+→ Temporary password invalidated
+→ Privileged administrator session issued
 ```
 
-The bootstrap process may be implemented through an application seed/bootstrap command. Direct manual SQL insertion is not the normal supported business workflow.
+The exact API ordering between OTP verification and forced password change will be finalized in the Login API contract, but neither requirement may be bypassed.
 
 ---
 
@@ -150,8 +153,8 @@ Additional Administrator accounts are created through a dedicated authenticated 
 Conceptual API responsibility:
 
 ```text
-Administrator Invitation Endpoint
-→ Backend assigns ADMIN
+POST /api/v1/admin/admin-invitations
+→ Backend assigns ADMIN through the trusted workflow
 ```
 
 Business rules:
@@ -162,28 +165,150 @@ Business rules:
 - The inviting Administrator supplies the target email address and required profile data.
 - The inviting Administrator does not choose or know the invited Administrator's password.
 - The system sends a secure, time-limited, one-time invitation to the target email address.
+- **Administrator invitation validity is 24 hours.**
 - The invited person chooses their own password while accepting the invitation.
-- The backend provisions `role = ADMIN` only after the request has passed the required authorization and invitation workflow.
-- A successfully accepted email invitation establishes control of the invited email address.
-- The invited Administrator must complete required 2FA enrollment/verification before normal privileged access is granted.
-- Used, invalid, expired, or revoked invitations must not create or activate an Administrator account.
+- The backend provisions `role = ADMIN` only after the required authorization and invitation workflow succeeds.
+- Invitation expiry alone must not create or activate an Administrator account.
+- Used, invalid, expired or revoked invitations must not create or activate an Administrator account.
+- Resending / reissuing an Administrator invitation generates a new invitation token and invalidates the previously issued invitation immediately.
+- Only the latest issued Administrator invitation token is valid.
+- Invitation acceptance must not create duplicate accounts for the same email address.
+- A successfully accepted invitation establishes control of the invited email address.
+- The invited Administrator is not considered logged in merely because the account was successfully created.
+- Future Administrator login requires password verification plus the mandatory email-based second verification step.
 
 Conceptual flow:
 
 ```text
 Existing ADMIN
 → Administrator-specific invitation endpoint
-→ Invitation sent to target email
-→ Invitee opens valid invitation
+→ Raw invitation token sent to target email
+→ Token hash stored in database
+→ Invitee opens valid invitation within 24 hours
 → Invitee chooses own password
 → Backend provisions ADMIN
-→ Required 2FA enrollment/verification
-→ Administrator account ready for privileged access
+→ Invitation marked used
+→ Account ready for later Administrator login
+```
+
+### Expected Status-Code Baseline
+
+For the reviewed invitation scenarios:
+
+```text
+Valid invitation creation                           → 201 Created
+Authenticated CUSTOMER attempts Admin invitation    → 403 Forbidden
+Missing/invalid authentication on Admin endpoint    → 401 Unauthorized
+Expired invitation acceptance                       → 400 Bad Request
+Revoked/old invitation acceptance after resend      → 400 Bad Request
+Valid invitation acceptance and Admin creation      → 201 Created
+```
+
+Invalid, expired, used and revoked invitation credentials should use a generic contract response such as `INVALID_INVITATION` rather than exposing unnecessary token-state details.
+
+---
+
+## 6. Administrator Email OTP / Second-Step Authentication
+
+For Version 1, Administrator second-step authentication uses a **six-digit verification code sent to the Administrator's email address**. An authenticator application is not required.
+
+This is separate from account invitation:
+
+```text
+Administrator Invitation Email
+→ provisions / creates an Admin account
+
+Administrator Login Email OTP
+→ completes authentication during a new login session
+```
+
+Approved behavior:
+
+- The Administrator first submits Email + Password.
+- Correct primary credentials alone do not complete Administrator authentication.
+- The backend generates a six-digit email OTP / login challenge.
+- The raw code is delivered by email.
+- OTP challenge material should be stored securely, preferably as a hash rather than plaintext.
+- Access and Refresh Tokens must not be issued before successful OTP verification.
+- The OTP is one-time use.
+- Requesting a replacement OTP invalidates the previously issued OTP.
+- Email delivery failure must not bypass OTP verification or cause privileged tokens to be issued.
+- The second verification step is required for **every new Administrator login session** in Version 1.
+- Trusted-device / remember-this-device behavior is outside Version 1 scope.
+
+The exact OTP lifetime, failed-attempt limit, resend cooldown and recovery rules remain to be finalized during Login API contract review.
+
+Conceptual Administrator login flow:
+
+```text
+Email + Password
+→ credentials valid
+→ Admin role detected
+→ Generate 6-digit email OTP
+→ Send OTP
+→ Return pre-authentication challenge state only
+→ Admin submits OTP
+→ Validate OTP / expiry / attempts / used state
+→ Authentication complete
+→ Issue Access Token + Refresh Token
 ```
 
 ---
 
-## 6. Direct Database Creation
+## 7. Token Storage and Lifetime Principle
+
+Verification and invitation tokens are treated as secret credentials.
+
+For opaque link-based tokens such as email verification and Admin invitation tokens:
+
+```text
+Backend generates secure random RAW TOKEN
+→ RAW TOKEN is sent to the user in the email link
+→ Backend hashes the raw token
+→ Database stores TOKEN HASH, not raw token
+```
+
+When the user submits the raw token:
+
+```text
+Backend receives RAW TOKEN
+→ hashes received token
+→ compares resulting hash with stored token_hash
+→ then checks time and lifecycle state
+```
+
+A valid token requires:
+
+```text
+token hash matches
+AND NOW < expires_at
+AND used_at IS NULL
+AND revoked_at IS NULL
+```
+
+Recommended token lifecycle fields include:
+
+```text
+created_at
+expires_at
+used_at
+revoked_at
+```
+
+The backend calculates `expires_at` using the approved business lifetime. The duration should be configurable rather than scattered as hard-coded values.
+
+Examples:
+
+```text
+EMAIL_VERIFICATION_EXPIRY_HOURS=24
+ADMIN_INVITATION_EXPIRY_HOURS=24
+```
+
+Timestamps should be stored consistently, preferably in UTC, with user-facing timezone conversion handled separately when needed.
+
+---
+
+## 8. Direct Database Creation
 
 Creating an Administrator or Customer directly through PostgreSQL is technically possible for controlled development, testing, or emergency maintenance, but it is not the normal supported account-provisioning workflow.
 
@@ -211,7 +336,7 @@ Any controlled database setup used for testing must preserve application securit
 
 ---
 
-## 7. Authorization Expectations
+## 9. Authorization Expectations
 
 The backend shall use the authenticated user's stored role when authorizing protected operations.
 
@@ -232,41 +357,46 @@ The API caller does not become an Administrator merely by submitting a role-like
 
 ---
 
-## 8. Authentication API QA Scope
+## 10. Authentication API QA Scope
 
-During the Authentication API testing phase, QA will include coverage for the role-provisioning behavior defined here, including:
+During the Authentication API testing phase, QA will include coverage for:
 
 - Customer public self-registration.
-- Verifying that the public registration contract does not expose role selection.
-- Verifying that public registration cannot self-assign the `ADMIN` role through unexpected fields.
+- Verifying that public registration does not expose role selection.
+- Verifying that public registration cannot self-assign `ADMIN` through unexpected fields.
 - Administrator creation/initiation of a Customer account through the Customer-specific Administrator flow.
 - Customer activation after Administrator-initiated provisioning.
 - Verifying that a Customer cannot use the Administrator customer-creation operation.
-- Duplicate-email handling for Administrator-created Customers.
-- Invalid, expired, reused and revoked Customer activation invitations after the final API contract is agreed.
-- Initial Administrator bootstrap behavior.
-- Administrator first-login restrictions.
-- Administrator authentication and mandatory 2FA behavior.
+- Initial Administrator bootstrap behavior and idempotency.
+- Initial Administrator first-sign-in forced password replacement.
+- Verifying that the original temporary password becomes invalid after successful replacement.
 - Creating/inviting an additional Administrator through the Administrator-specific invitation flow.
 - Verifying that a Customer cannot create or invite an Administrator.
+- Verifying that an Admin invitation remains valid only for 24 hours.
+- Invalid, expired, reused and revoked Administrator invitation behavior.
+- Verifying that resend / reissue invalidates the previous Admin invitation.
+- Verifying that only the latest Admin invitation token can be used.
 - Verifying that the Admin invitation contract does not depend on a caller-supplied generic role value.
-- Invalid, expired, reused and revoked Administrator invitation behavior after the final API contract is agreed.
+- Verifying that Admin login does not issue Access/Refresh Tokens after password validation alone.
+- Verifying mandatory email OTP for every new Administrator login session.
+- Invalid, expired, reused and replaced Admin login OTP scenarios after the remaining OTP contract values are finalized.
 - Database verification that accounts created through each workflow contain the expected backend-assigned role.
+- Security verification that raw invitation / verification secrets are not stored in plaintext where the design requires hashed storage.
 
 Detailed test cases will be derived after the Authentication API contract is reviewed and frozen.
 
 ---
 
-## 9. Items to Finalize During API Contract Review
+## 11. Remaining Items to Finalize During API Contract Review
 
-The following details will be finalized while reviewing the Authentication API contract:
+The following details still require final contract decisions:
 
 1. Exact endpoint and request/response contract for Administrator-created Customer accounts.
 2. Customer activation-invitation lifetime and resend/revocation rules.
 3. Duplicate-email response when an Administrator attempts to create a Customer whose email already exists.
-4. Exact endpoint names and request/response structures for Administrator invitations and invitation acceptance.
-5. Administrator invitation lifetime and resend/revocation rules.
-6. Behavior when an Administrator invitation targets an email that already belongs to an existing account.
-7. Exact validation response for unexpected privileged fields submitted to public registration.
-8. Exact pre-authentication flow for mandatory first-password change and Administrator 2FA enrollment.
-9. Exact Administrator 2FA delivery and recovery mechanism.
+4. Exact request/response structures for Administrator invitation acceptance and optional invitation resend endpoint.
+5. Behavior when an Administrator invitation targets an email that already belongs to an existing account.
+6. Exact validation response for unexpected privileged fields submitted to public registration.
+7. Exact pre-authentication API sequence for initial Admin email OTP plus mandatory first-password change.
+8. Administrator login OTP lifetime, maximum failed attempts, resend cooldown and recovery behavior.
+9. Exact Login endpoint response structures for Customer authentication and Administrator pre-authentication challenge state.
