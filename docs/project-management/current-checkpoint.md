@@ -6,7 +6,7 @@ Use this file together with `docs/project-management/project-continuity.md` as t
 
 Suggested message to start a new chat:
 
-> Continue my QA Commerce Lab project from GitHub repository `mohamadalazzeh/qa-commerce-lab`. Read `docs/project-management/project-continuity.md` and `docs/project-management/current-checkpoint.md` first. Continue from the current Authentication/Login review. Keep the work interactive and company-like. Focus now on Requirements, Business Rules, API behavior, Decision Tables, Test Scenarios, UAT, Security thinking and DB implications. Do not create detailed Test Cases yet; detailed Test Cases are reserved for the later Postman execution phase after the backend is built.
+> Continue my QA Commerce Lab project from GitHub repository `mohamadalazzeh/qa-commerce-lab`. Read `docs/project-management/project-continuity.md` and `docs/project-management/current-checkpoint.md` first. Continue from the current Authentication/Login review. Keep the work interactive and company-like. Focus now on Requirements, Business Rules, API behavior, Test Scenarios, UAT, Security thinking and DB implications. Do not create detailed Test Cases yet; detailed Test Cases are reserved for the later Postman execution phase after the backend is built.
 
 ---
 
@@ -29,23 +29,20 @@ Completed / substantially agreed before Login:
 
 ## Current Learning / Working Style
 
-The current phase is intentionally interactive.
-
-Focus sequence:
+Current phase:
 
 ```text
 Requirement
 → Business Rule
 → Ambiguity / Clarification
 → API Behavior
-→ Decision Table where useful
 → Test Scenario
 → UAT
 → Security Thinking
 → Backend / DB implication
 ```
 
-Detailed Test Cases are intentionally postponed until the backend is built and practical execution begins with Postman and PostgreSQL.
+Decision Tables may be used when useful, but should not slow project delivery. Detailed Test Cases are intentionally postponed until the backend is built and practical execution begins with Postman and PostgreSQL.
 
 Later execution phase:
 
@@ -61,8 +58,6 @@ Test Cases
 ---
 
 ## Approved Login Account-State Behavior
-
-Current Login decision logic:
 
 | Credentials | Account State | Expected Behavior |
 |---|---|---|
@@ -82,17 +77,15 @@ Correct credentials
 → account state may then determine a more specific business response
 ```
 
-This protects against unnecessary account-state disclosure while still giving legitimate users useful recovery guidance.
-
 ---
 
 ## Login Account Lockout Rules
 
-Approved requirement behavior:
+Approved behavior:
 
 ```text
 5 consecutive failed login attempts
-→ account locked for 15 minutes
+→ account temporarily locked for 15 minutes
 ```
 
 Important meaning of **consecutive**:
@@ -103,19 +96,16 @@ Wrong ×3
 → failed_login_attempts resets to 0
 ```
 
-Successful authentication breaks the failure sequence.
-
 Approved lock behavior:
 
 ```text
 Wrong ×5
 → lock starts
-→ correct password after 1 minute: still rejected
-→ correct password before full 15 minutes: still rejected
+→ correct password before 15 minutes: still rejected
 → after lock expires: a new login attempt is allowed
 ```
 
-Conceptual DB state may include:
+Conceptual DB state:
 
 ```text
 failed_login_attempts
@@ -131,68 +121,95 @@ if NOW < locked_until
 
 After lock expiry, a new failed-attempt sequence begins. After a successful login, the failure counter resets to zero and stale lock state is cleared.
 
+`DISABLED` is a separate business/account status and must not be used to represent a temporary security lock.
+
 ---
 
-## Rate Limiting — Current Discussion Point
+## Approved Login Rate-Limiting Direction
 
-The discussion has moved from Account Lockout to **Rate Limiting**.
-
-Key distinction already established:
+Rate Limiting is separate from Account Lockout.
 
 ```text
 Account Lockout
-→ protects a specific account from repeated password guessing
-→ based on consecutive failed attempts for that account
+→ protects a specific account
+→ based on consecutive failed credentials
+→ 5 failures / 15-minute temporary lock
 
 Rate Limiting
-→ protects the login endpoint / system from excessive request volume
-→ may apply even when requests target different accounts
+→ protects the Login endpoint/system from excessive request volume
+→ can trigger even when requests target many different accounts
 ```
 
-Important design concern identified:
+The project does **not** use IP-only rate limiting as the sole control because legitimate users may share the same public IP.
 
-A simplistic IP-only rate limit can block legitimate users who share the same network or who arrive during legitimate traffic spikes. Therefore the project should think in terms of layered controls such as:
+Approved layered design direction:
 
 ```text
-per-IP rate limiting
+Account/email request signal
 +
-per-account failed-attempt protection
+Source IP request signal
 +
-temporary account lockout
+Per-account failed-attempt protection
 ```
 
-Exact numerical rate-limit thresholds and windows have **not yet been finalized**.
+Current baseline thresholds for Version 1:
 
-The next interactive exercise should continue from Rate Limiting and then expand the Login Decision Table to include account state, lock state, role and Admin OTP state.
+```text
+Per account/email login-request limit
+→ 10 requests per minute
+
+Per source IP login-request limit
+→ 60 requests per minute
+
+Threshold exceeded
+→ 429 Too Many Requests
+→ include Retry-After where practical
+```
+
+Why the IP threshold is higher: multiple legitimate users may share one network/NAT, so IP protection must be less aggressive than account-level protection.
+
+Important behavior examples:
+
+```text
+Same account receives many requests rapidly
+→ account-level rate limit may trigger
+
+Same IP sends requests against many different accounts rapidly
+→ IP-level rate limit may trigger
+
+Wrong password ×5 on one account
+→ account lockout may trigger before the account request-rate threshold is reached
+```
+
+Rate-limit values should be configurable in backend/environment settings rather than hard-coded.
+
+Possible configuration direction:
+
+```text
+LOGIN_ACCOUNT_RATE_LIMIT_MAX=10
+LOGIN_ACCOUNT_RATE_LIMIT_WINDOW_SECONDS=60
+LOGIN_IP_RATE_LIMIT_MAX=60
+LOGIN_IP_RATE_LIMIT_WINDOW_SECONDS=60
+LOGIN_LOCKOUT_FAILED_ATTEMPTS=5
+LOGIN_LOCKOUT_MINUTES=15
+```
 
 ---
 
 ## Decision Table Learning Point
 
-The Login flow is a strong candidate for Decision Table Testing because multiple conditions influence the outcome.
+Login is a strong candidate for Decision Table Testing because multiple conditions influence the result, such as credential validity, account state, temporary lock state, role and Admin OTP completion.
 
-Examples of conditions:
+Decision Tables are useful for organizing logic, but they are not the current priority; project delivery should continue first.
 
-```text
-Credentials valid?
-Account ACTIVE / PENDING_VERIFICATION / DISABLED?
-Account currently locked?
-Role CUSTOMER / ADMIN?
-Admin OTP completed?
-```
-
-A Decision Table is used to organize combinations of conditions and resulting actions. Test Scenarios are then derived from the meaningful rules/rows of that table.
-
-Example:
+Example rule:
 
 ```text
 Valid credentials + PENDING_VERIFICATION
 → EMAIL_VERIFICATION_REQUIRED
 ```
 
-is a Decision Table rule / condition-action combination.
-
-A corresponding Test Scenario would be:
+Corresponding Test Scenario:
 
 > Verify that a user with valid credentials and `PENDING_VERIFICATION` status is prevented from normal login and is required to complete email verification.
 
@@ -200,6 +217,14 @@ A corresponding Test Scenario would be:
 
 ## Immediate Next Step
 
-Continue the interactive Login discussion from **Rate Limiting**.
+Continue Authentication/Login with the **Admin email OTP login flow** and finalize:
 
-Do not jump to detailed Test Cases yet.
+- OTP lifetime
+- maximum failed OTP attempts
+- resend cooldown
+- behavior after requesting a new OTP
+- expected status codes / error behavior
+- when Access Token and Refresh Token are issued
+- special handling for the bootstrap Admin that must change the temporary password
+
+Then continue to Refresh Token, Logout and Password Recovery.
