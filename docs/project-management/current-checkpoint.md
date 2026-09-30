@@ -196,6 +196,86 @@ LOGIN_LOCKOUT_MINUTES=15
 
 ---
 
+## Approved Admin Login OTP Flow
+
+Admin authentication has an additional email OTP step after correct email/password credentials.
+
+```text
+Admin enters email + password
+→ normal Login rate limiting applies
+→ normal Account Lockout protection applies
+→ credentials valid
+→ generate and email 6-digit OTP
+→ do NOT issue Access/Refresh tokens yet
+→ Admin submits OTP
+→ OTP validated
+→ issue Access + Refresh tokens
+```
+
+Approved Admin Login OTP baseline:
+
+```text
+OTP format
+→ 6 digits
+
+OTP validity
+→ 5 minutes
+
+Maximum failed OTP attempts
+→ 5
+
+OTP resend cooldown
+→ 60 seconds
+
+New OTP issued
+→ previous OTP becomes invalid immediately
+
+OTP usage
+→ one-time only
+```
+
+After five wrong OTP submissions, the current OTP challenge is invalidated and the Admin must begin a new authentication attempt. This does **not** change the account status to `DISABLED`.
+
+Important separation of controls:
+
+```text
+Wrong password ×5
+→ account temporarily locked for 15 minutes
+
+Excessive Login request volume
+→ rate limited / 429
+
+Wrong Admin OTP ×5
+→ current OTP challenge invalidated
+→ no session/tokens issued
+```
+
+Login Account Lockout and Login Rate Limiting apply to **both CUSTOMER and ADMIN**. The Admin OTP is an additional security layer, not a replacement for those protections.
+
+Conceptually:
+
+```text
+CUSTOMER LOGIN
+Email + Password
+→ Login rate limit
+→ Account Lockout protection
+→ successful authentication
+→ Access + Refresh tokens
+
+ADMIN LOGIN
+Email + Password
+→ Login rate limit
+→ Account Lockout protection
+→ Email OTP
+→ OTP attempt/expiry/resend protections
+→ successful authentication
+→ Access + Refresh tokens
+```
+
+Customer login does not require OTP in the normal V1 flow. Password-recovery OTP is a separate flow and should not be confused with Admin Login OTP.
+
+---
+
 ## Decision Table Learning Point
 
 Login is a strong candidate for Decision Table Testing because multiple conditions influence the result, such as credential validity, account state, temporary lock state, role and Admin OTP completion.
@@ -217,14 +297,12 @@ Corresponding Test Scenario:
 
 ## Immediate Next Step
 
-Continue Authentication/Login with the **Admin email OTP login flow** and finalize:
+Finish Login API behavior by freezing:
 
-- OTP lifetime
-- maximum failed OTP attempts
-- resend cooldown
-- behavior after requesting a new OTP
-- expected status codes / error behavior
-- when Access Token and Refresh Token are issued
+- Customer success response/status
+- Admin first-step response/status and OTP challenge representation
+- Admin OTP verification response/status and error behavior
 - special handling for the bootstrap Admin that must change the temporary password
+- high-level Login Test Scenarios and UAT
 
 Then continue to Refresh Token, Logout and Password Recovery.
