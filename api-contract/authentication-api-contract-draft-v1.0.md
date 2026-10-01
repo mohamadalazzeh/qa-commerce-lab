@@ -137,25 +137,36 @@ An expired verification link is intentionally distinguishable from an unknown/in
 
 ---
 
-## 3. Resend Verification — Expired-Link UX Decision
+## 3. Resend Verification — Expiry-Only V1 Flow
 
-### Primary Version 1 User Flow
+### User Experience
 
-The preferred Version 1 experience begins from the expired verification-link page.
+For Version 1, a replacement verification email is available only after the currently valid verification link expires.
+
+While the latest verification link is still inside its 24-hour validity window, the frontend does not offer an active Resend Verification Email action.
 
 ```text
-Customer opens old verification link
-→ frontend calls verify-email
-→ backend returns VERIFICATION_TOKEN_EXPIRED
-→ frontend displays an expired-link message
-→ frontend displays [Resend Verification Email]
-→ Customer clicks the button only
-→ Customer is not required to type the email again
+Registration
+→ verification email/link issued
+→ link remains valid for 24 hours
+→ resend is unavailable while latest link is valid
 ```
 
-The resend action uses the expired verification token/context to identify the original pending account. The backend must not require the Customer to re-enter an email address in this expired-link flow.
+After expiry:
 
-Conceptual request direction:
+```text
+Customer opens expired verification link
+→ frontend calls verify-email
+→ backend returns VERIFICATION_TOKEN_EXPIRED
+→ frontend displays "Verification link expired"
+→ frontend displays [Resend Verification Email]
+→ Customer clicks the button only
+→ Customer does NOT type the email again
+```
+
+The resend action uses the expired verification token/context to identify the original pending account. The destination email is the email already stored on that account and cannot be changed from this flow.
+
+### Request Direction
 
 ```http
 POST /api/v1/auth/resend-verification
@@ -168,22 +179,39 @@ Content-Type: application/json
 }
 ```
 
-The backend may use the stored token record to resolve the associated user/account even though the token is expired. Expiry prevents activation; it does not erase the relationship between the token record and the account.
+The expired token cannot activate the account, but its stored record can still identify which pending account it belonged to.
 
-### Resend Rules
+### Success
 
 ```text
-Resend cooldown                 → 60 seconds
-Successful resend              → generate a new verification token
-New token issued               → previous token becomes invalid
-Only newest link               → can activate the account
-Account                        → remains the same existing account
-Duplicate account              → must not be created
+200 OK
 ```
 
-The replacement verification email is sent to the email already associated with that account. The expired-link page must not allow the caller to change the destination email.
+```json
+{
+  "message": "A new verification email has been sent."
+}
+```
 
-The exact success response and remaining resend error schema will be frozen next.
+Successful resend:
+
+```text
+latest verification token must be expired
+→ generate a new verification token
+→ new link is valid for 24 hours
+→ previous token remains unusable
+→ same existing Customer account remains
+→ no duplicate account
+→ resend becomes unavailable again while the new latest link is valid
+```
+
+An old expired token must not be reusable to repeatedly trigger replacement emails while a newer verification link is active.
+
+### Superseded Rule
+
+The earlier Customer Email Verification rule of a **60-second resend cooldown** is no longer applicable to verification links. The 60-second resend cooldown remains applicable to short-lived OTP flows where separately defined, such as Admin Login OTP and Password Recovery OTP.
+
+The exact HTTP status/business code for an attempted resend while a newer verification link is still valid will be frozen next.
 
 ---
 
@@ -380,7 +408,7 @@ An Admin who resets the password must still complete the normal Admin Email OTP 
 
 A frontend is optional and may be implemented after the backend/API project is complete.
 
-The Authentication API should therefore remain frontend-ready with stable business/error codes, clear success/failure responses, and flows that map cleanly to future UI screens.
+The Authentication API should remain frontend-ready with stable business/error codes, clear success/failure responses, and flows that map cleanly to future UI screens.
 
 ---
 
@@ -391,13 +419,14 @@ Completed/frozen in the current endpoint-by-endpoint review:
 ```text
 Customer Registration ✅
 Customer Email Verification ✅
-Expired-link resend UX direction ✅
+Expired-link resend request/success behavior ✅
+Verification resend availability only after latest-link expiry ✅
 ```
 
 Next:
 
 ```text
-Freeze resend-verification success/error response
+Freeze resend-verification remaining error response
 → First Admin / Admin invitation contract details
 → Login
 → Admin OTP
