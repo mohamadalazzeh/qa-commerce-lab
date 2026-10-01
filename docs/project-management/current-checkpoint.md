@@ -4,305 +4,273 @@
 
 Use this file together with `docs/project-management/project-continuity.md` as the source of truth for project continuity.
 
-Suggested message to start a new chat:
+Suggested message:
 
-> Continue my QA Commerce Lab project from GitHub repository `mohamadalazzeh/qa-commerce-lab`. Read `docs/project-management/project-continuity.md` and `docs/project-management/current-checkpoint.md` first. Continue from the current Authentication/Login review. Keep the work interactive and company-like. Focus now on Requirements, Business Rules, API behavior, Test Scenarios, UAT, Security thinking and DB implications. Do not create detailed Test Cases yet; detailed Test Cases are reserved for the later Postman execution phase after the backend is built.
-
----
-
-## Current Module
-
-**Authentication — Login review**
-
-Completed / substantially agreed before Login:
-
-- Customer registration
-- Customer email verification
-- Resend verification
-- Verification token lifecycle
-- First Admin bootstrap
-- Additional Admin invitation
-- Admin invitation token lifecycle
-- Admin email OTP / second authentication step
+> Continue my QA Commerce Lab project from GitHub repository `mohamadalazzeh/qa-commerce-lab`. Read `docs/project-management/project-continuity.md` and `docs/project-management/current-checkpoint.md` first. Authentication requirements are now frozen at a high level. Continue from the Authentication OpenAPI/API-contract phase. Keep the work fast-track, practical and company-like. Detailed Test Cases remain postponed until the backend is implemented and Postman execution begins.
 
 ---
 
-## Current Learning / Working Style
+## Current Module Status
 
-Current phase:
+**Authentication requirements / business behavior: substantially complete.**
+
+Completed and documented:
+
+```text
+Customer Registration ✅
+Email Verification ✅
+Resend Verification ✅
+First Admin Bootstrap ✅
+Additional Admin Invitation ✅
+Customer Login ✅
+Admin Login + Email OTP ✅
+Account Lockout ✅
+Login Rate Limiting ✅
+First Admin Forced Password Change ✅
+Refresh Token ✅
+Logout ✅
+Password Recovery OTP ✅
+Password Reset ✅
+Authentication Test Scenarios ✅
+Authentication UAT ✅
+```
+
+Dedicated documents:
+
+```text
+docs/requirements/authentication-login-session-recovery-clarification-v1.0.md
+qa/test-scenarios/authentication-test-scenarios-v1.0.md
+qa/uat/authentication-uat-v1.0.md
+```
+
+Detailed Test Cases are still intentionally deferred until the backend exists and practical Postman/PostgreSQL execution begins.
+
+---
+
+## Frozen Login Behavior
+
+### Customer
+
+```text
+ACTIVE + valid credentials
++ no temporary lock
++ no active rate limit
+→ 200 OK
+→ Access Token + Refresh Token
+→ normal application access
+```
+
+Normal Customer Login does not require OTP in Version 1.
+
+```text
+Invalid email/password                    → 401 Unauthorized
+Correct credentials + PENDING_VERIFICATION→ 403 / EMAIL_VERIFICATION_REQUIRED
+Correct credentials + DISABLED            → 403 / ACCOUNT_DISABLED
+Temporary account lock active             → 423 Locked
+Rate limit exceeded                        → 429 Too Many Requests
+```
+
+Wrong credentials must not disclose account state.
+
+### Admin
+
+```text
+Email + Password
+→ same Login Rate Limiting as Customer
+→ same Account Lockout protection as Customer
+→ if credentials valid, send 6-digit Email OTP
+→ no normal Access/Refresh tokens yet
+→ OTP verified
+→ authentication continues
+```
+
+Admin Login OTP:
+
+```text
+6 digits
+5-minute lifetime
+5 failed attempts maximum
+60-second resend cooldown
+newest OTP only
+one-time use
+```
+
+After five wrong OTP attempts, the current OTP challenge is invalidated. The Admin account is not changed to `DISABLED` merely because the OTP challenge failed.
+
+---
+
+## Frozen Login Protection
+
+Account Lockout applies to both Customer and Admin password authentication:
+
+```text
+5 consecutive failed password attempts
+→ temporary lock for 15 minutes
+```
+
+Successful authentication before the fifth failure resets the failed-attempt sequence.
+
+Rate Limiting is separate from Account Lockout:
+
+```text
+Per account/email → 10 Login requests / minute
+Per source IP     → 60 Login requests / minute
+Exceeded          → 429 Too Many Requests
+Retry-After       → include where practical
+```
+
+The project does not rely on IP-only limiting as the sole control. Thresholds must be configurable rather than hard-coded.
+
+`DISABLED` is a business/account status and is not used to represent temporary security lock state.
+
+---
+
+## First Admin Special Flow
+
+Only the bootstrap Admin begins with a temporary password.
+
+User-facing first-login flow:
+
+```text
+Email + Temporary Password
+→ Admin Email OTP
+→ OTP verified
+→ mandatory Change Password screen
+→ Current Password + New Password + Confirm New Password
+→ temporary password invalidated
+→ must_change_password = false
+→ normal privileged Admin session
+```
+
+The Admin must not access normal privileged functionality before completing the mandatory password replacement.
+
+Additional invited Admins choose their own password during invitation acceptance and therefore do not use this forced temporary-password flow.
+
+---
+
+## Refresh Token
+
+```text
+Access Token lifetime  → 15 minutes
+Refresh Token lifetime → 7 days
+```
+
+Refresh uses rotation:
+
+```text
+Valid Refresh Token
+→ old Refresh Token invalidated
+→ new Access Token
+→ new Refresh Token
+```
+
+A used/rotated Refresh Token cannot be reused. A `DISABLED` account cannot refresh its session.
+
+---
+
+## Logout
+
+Logout applies to Customer and Admin:
+
+```text
+Logout
+→ current session invalidated
+→ current Refresh Token invalidated
+→ full authentication required for a new session
+```
+
+Server-side session/revocation state may use Redis or equivalent implementation support.
+
+---
+
+## Password Recovery
+
+Password Recovery applies to Customer and Admin and is separate from Customer Email Verification and Admin Login OTP.
+
+Public recovery response should be generic to reduce account-enumeration risk.
+
+Password Recovery OTP:
+
+```text
+6 digits
+5-minute lifetime
+5 failed attempts maximum
+60-second resend cooldown
+newest OTP only
+one-time use
+```
+
+Successful password reset:
+
+```text
+old password invalid
+→ existing sessions invalidated
+→ existing Refresh Tokens invalidated
+→ user signs in again with new password
+```
+
+Admin users still complete normal Admin Email OTP during the next Login.
+
+---
+
+## Frontend Future Option
+
+A frontend is not part of the current required implementation phase, but the backend/API should remain frontend-ready.
+
+Potential later phase:
+
+```text
+Backend/API complete
+→ Frontend implementation
+→ UI functional testing
+→ API/UI integration testing
+→ End-to-End testing
+→ browser/responsive testing
+→ regression
+```
+
+API responses should therefore use stable business/error codes that a future UI can route on, while the backend remains the source of truth for business and security rules.
+
+---
+
+## Current QA Working Style
+
+Fast-track sequence:
 
 ```text
 Requirement
 → Business Rule
-→ Ambiguity / Clarification
+→ Clarification
 → API Behavior
 → Test Scenario
 → UAT
-→ Security Thinking
-→ Backend / DB implication
 ```
 
-Decision Tables may be used when useful, but should not slow project delivery. Detailed Test Cases are intentionally postponed until the backend is built and practical execution begins with Postman and PostgreSQL.
-
-Later execution phase:
+Later, after backend implementation:
 
 ```text
-Test Cases
-→ Postman
-→ SQL / DB Validation
+Detailed Test Cases
+→ Postman execution
+→ SQL / DB validation
 → Defects
 → Retest
 → Regression
 ```
 
----
-
-## Approved Login Account-State Behavior
-
-| Credentials | Account State | Expected Behavior |
-|---|---|---|
-| Valid | `ACTIVE` | Login may continue |
-| Invalid email or password | Any | Generic authentication failure; do not reveal which credential is incorrect |
-| Valid | `PENDING_VERIFICATION` | Reject normal login and return `EMAIL_VERIFICATION_REQUIRED` so the client can direct the user to the verification/resend flow |
-| Valid | `DISABLED` | Reject login and return an account-disabled result such as `ACCOUNT_DISABLED` |
-| Invalid password | `PENDING_VERIFICATION` or other known account state | Generic authentication failure; do not disclose account state before credentials are proven |
-
-Important principle:
-
-```text
-Wrong credentials
-→ generic response first
-
-Correct credentials
-→ account state may then determine a more specific business response
-```
-
----
-
-## Login Account Lockout Rules
-
-Approved behavior:
-
-```text
-5 consecutive failed login attempts
-→ account temporarily locked for 15 minutes
-```
-
-Important meaning of **consecutive**:
-
-```text
-Wrong ×3
-→ successful login
-→ failed_login_attempts resets to 0
-```
-
-Approved lock behavior:
-
-```text
-Wrong ×5
-→ lock starts
-→ correct password before 15 minutes: still rejected
-→ after lock expires: a new login attempt is allowed
-```
-
-Conceptual DB state:
-
-```text
-failed_login_attempts
-locked_until
-```
-
-Backend logic concept:
-
-```text
-if NOW < locked_until
-→ reject login even if the supplied password is correct
-```
-
-After lock expiry, a new failed-attempt sequence begins. After a successful login, the failure counter resets to zero and stale lock state is cleared.
-
-`DISABLED` is a separate business/account status and must not be used to represent a temporary security lock.
-
----
-
-## Approved Login Rate-Limiting Direction
-
-Rate Limiting is separate from Account Lockout.
-
-```text
-Account Lockout
-→ protects a specific account
-→ based on consecutive failed credentials
-→ 5 failures / 15-minute temporary lock
-
-Rate Limiting
-→ protects the Login endpoint/system from excessive request volume
-→ can trigger even when requests target many different accounts
-```
-
-The project does **not** use IP-only rate limiting as the sole control because legitimate users may share the same public IP.
-
-Approved layered design direction:
-
-```text
-Account/email request signal
-+
-Source IP request signal
-+
-Per-account failed-attempt protection
-```
-
-Current baseline thresholds for Version 1:
-
-```text
-Per account/email login-request limit
-→ 10 requests per minute
-
-Per source IP login-request limit
-→ 60 requests per minute
-
-Threshold exceeded
-→ 429 Too Many Requests
-→ include Retry-After where practical
-```
-
-Why the IP threshold is higher: multiple legitimate users may share one network/NAT, so IP protection must be less aggressive than account-level protection.
-
-Important behavior examples:
-
-```text
-Same account receives many requests rapidly
-→ account-level rate limit may trigger
-
-Same IP sends requests against many different accounts rapidly
-→ IP-level rate limit may trigger
-
-Wrong password ×5 on one account
-→ account lockout may trigger before the account request-rate threshold is reached
-```
-
-Rate-limit values should be configurable in backend/environment settings rather than hard-coded.
-
-Possible configuration direction:
-
-```text
-LOGIN_ACCOUNT_RATE_LIMIT_MAX=10
-LOGIN_ACCOUNT_RATE_LIMIT_WINDOW_SECONDS=60
-LOGIN_IP_RATE_LIMIT_MAX=60
-LOGIN_IP_RATE_LIMIT_WINDOW_SECONDS=60
-LOGIN_LOCKOUT_FAILED_ATTEMPTS=5
-LOGIN_LOCKOUT_MINUTES=15
-```
-
----
-
-## Approved Admin Login OTP Flow
-
-Admin authentication has an additional email OTP step after correct email/password credentials.
-
-```text
-Admin enters email + password
-→ normal Login rate limiting applies
-→ normal Account Lockout protection applies
-→ credentials valid
-→ generate and email 6-digit OTP
-→ do NOT issue Access/Refresh tokens yet
-→ Admin submits OTP
-→ OTP validated
-→ issue Access + Refresh tokens
-```
-
-Approved Admin Login OTP baseline:
-
-```text
-OTP format
-→ 6 digits
-
-OTP validity
-→ 5 minutes
-
-Maximum failed OTP attempts
-→ 5
-
-OTP resend cooldown
-→ 60 seconds
-
-New OTP issued
-→ previous OTP becomes invalid immediately
-
-OTP usage
-→ one-time only
-```
-
-After five wrong OTP submissions, the current OTP challenge is invalidated and the Admin must begin a new authentication attempt. This does **not** change the account status to `DISABLED`.
-
-Important separation of controls:
-
-```text
-Wrong password ×5
-→ account temporarily locked for 15 minutes
-
-Excessive Login request volume
-→ rate limited / 429
-
-Wrong Admin OTP ×5
-→ current OTP challenge invalidated
-→ no session/tokens issued
-```
-
-Login Account Lockout and Login Rate Limiting apply to **both CUSTOMER and ADMIN**. The Admin OTP is an additional security layer, not a replacement for those protections.
-
-Conceptually:
-
-```text
-CUSTOMER LOGIN
-Email + Password
-→ Login rate limit
-→ Account Lockout protection
-→ successful authentication
-→ Access + Refresh tokens
-
-ADMIN LOGIN
-Email + Password
-→ Login rate limit
-→ Account Lockout protection
-→ Email OTP
-→ OTP attempt/expiry/resend protections
-→ successful authentication
-→ Access + Refresh tokens
-```
-
-Customer login does not require OTP in the normal V1 flow. Password-recovery OTP is a separate flow and should not be confused with Admin Login OTP.
-
----
-
-## Decision Table Learning Point
-
-Login is a strong candidate for Decision Table Testing because multiple conditions influence the result, such as credential validity, account state, temporary lock state, role and Admin OTP completion.
-
-Decision Tables are useful for organizing logic, but they are not the current priority; project delivery should continue first.
-
-Example rule:
-
-```text
-Valid credentials + PENDING_VERIFICATION
-→ EMAIL_VERIFICATION_REQUIRED
-```
-
-Corresponding Test Scenario:
-
-> Verify that a user with valid credentials and `PENDING_VERIFICATION` status is prevented from normal login and is required to complete email verification.
+Do not spend extended time on Decision Tables or other test-design techniques unless needed to clarify a requirement; deeper technique practice can be done later against the finished project.
 
 ---
 
 ## Immediate Next Step
 
-Finish Login API behavior by freezing:
+Move to the **Authentication OpenAPI / API Contract** and freeze the exact endpoints, request/response bodies, error schema and status codes needed by the backend implementation.
 
-- Customer success response/status
-- Admin first-step response/status and OTP challenge representation
-- Admin OTP verification response/status and error behavior
-- special handling for the bootstrap Admin that must change the temporary password
-- high-level Login Test Scenarios and UAT
+Then:
 
-Then continue to Refresh Token, Logout and Password Recovery.
+```text
+Authentication OpenAPI Contract
+→ Backend implementation
+→ Postman Test Cases
+→ PostgreSQL validation
+→ defect/retest/regression cycle
+```
