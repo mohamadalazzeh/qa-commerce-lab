@@ -34,19 +34,23 @@ This file intentionally does **not** contain detailed execution steps, test data
 
 **TS-AUTH-VER-02** — Verify that a valid verification link can activate the existing account within its 24-hour lifetime.
 
-**TS-AUTH-VER-03** — Verify that an expired verification link cannot activate the account.
+**TS-AUTH-VER-03** — Verify that an expired verification link cannot activate the account and returns expired-link behavior.
 
 **TS-AUTH-VER-04** — Verify that an expired verification link does not delete the Customer account.
 
-**TS-AUTH-VER-05** — Verify that a Customer can request a new verification email after the resend cooldown.
+**TS-AUTH-VER-05** — Verify that Resend Verification Email is unavailable while the latest verification link is still within its 24-hour validity window.
 
-**TS-AUTH-VER-06** — Verify that requesting a new verification email invalidates the previously issued verification link.
+**TS-AUTH-VER-06** — Verify that after the latest verification link expires, the Customer can request a replacement from the expired-link page without re-entering the email address.
 
-**TS-AUTH-VER-07** — Verify that only the latest verification link can activate the account.
+**TS-AUTH-VER-07** — Verify that a successful resend sends the replacement link to the email already stored on the existing Customer account.
 
-**TS-AUTH-VER-08** — Verify that a successfully used verification link cannot be reused.
+**TS-AUTH-VER-08** — Verify that the newly issued verification link receives a new 24-hour validity period and becomes the only usable verification link.
 
-**TS-AUTH-VER-09** — Verify that an expired verification link can be replaced without requiring Customer re-registration or creating a duplicate account.
+**TS-AUTH-VER-09** — Verify that a successfully used verification link cannot be reused.
+
+**TS-AUTH-VER-10** — Verify that replacing an expired verification link does not require Customer re-registration and does not create a duplicate account.
+
+**TS-AUTH-VER-11** — Verify that an older expired token cannot be reused to repeatedly trigger replacement emails while a newer verification link is still valid.
 
 ---
 
