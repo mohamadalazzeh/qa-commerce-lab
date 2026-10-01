@@ -2,32 +2,33 @@
 
 ## Purpose
 
-This document keeps the current project direction, approved decisions, active workstream and planned QA deliverables in one place so the project can continue consistently across future work sessions.
+This document keeps the current project direction, approved decisions, active workstream and planned QA deliverables in one place so the project can continue consistently across future sessions.
+
+Use it together with `docs/project-management/current-checkpoint.md`.
 
 ---
 
 ## Project Goal
 
-Build a realistic portfolio-grade QA project around a working e-commerce backend with API, PostgreSQL, email verification, authentication, authorization, transactions, concurrency, Dockerized services and realistic seeded defects.
+Build a realistic portfolio-grade QA project around a working e-commerce backend with API, PostgreSQL, authentication, authorization, email flows, transactions, concurrency, Dockerized services and realistic QA execution.
 
-Primary QA flow:
+The project is intentionally incremental by module:
 
 ```text
 Requirements
-→ User Stories / Acceptance Criteria
-→ API Contract Review
-→ Test Conditions / Test Scenarios
-→ Test Cases
-→ API Execution
-→ Database Validation
-→ Defect Reporting
+→ Business Rules / Clarifications
+→ API Contract
+→ Test Scenarios / UAT
+→ Backend Implementation
+→ Detailed Test Cases
+→ Postman API Testing
+→ SQL / DB Validation
+→ Defects
 → Retest
 → Regression
-→ QA Reporting
-→ Portfolio Artifacts
 ```
 
-The project follows a module-by-module approach:
+Module sequence:
 
 ```text
 Authentication
@@ -39,34 +40,34 @@ Authentication
 → Bulk Import
 ```
 
+Do not wait until every module's requirements are finished before testing. Finish one module's contract, build it, test it, then continue incrementally.
+
 ---
 
-## Current Module
+## Current Workstream
 
-**Authentication**
+Current module: **Authentication**.
 
-Current review sequence:
+Requirements/business behavior are substantially complete. Current work is the **Authentication API Contract**, reviewed endpoint-by-endpoint before backend implementation.
+
+Completed/frozen at the current contract level:
 
 ```text
 Customer Registration ✅
-→ Email Verification ✅
-→ Resend Verification ✅
-→ First Admin Provisioning ✅
-→ Additional Admin Invitation ✅
-→ Admin Email OTP / second-step rules ✅
-→ Login ← NEXT
-→ Refresh Token
-→ Logout
-→ Password Recovery
-→ OTP Verification
-→ Password Reset
+Customer Email Verification ✅
+Expired-link Verification Resend UX ✅
+Verification resend available only after link expiry ✅
 ```
+
+Detailed Test Cases remain intentionally deferred until the Authentication backend is running and Postman execution begins.
+
+**Before backend implementation starts, stop and discuss the backend plan with the user first.**
 
 ---
 
-## Approved Customer Registration Decisions
+## Customer Registration
 
-Public customer registration:
+Endpoint:
 
 ```http
 POST /api/v1/auth/register
@@ -79,87 +80,52 @@ Request fields:
 - `email`
 - `password`
 
-Public callers do not select a role. Successful public registration is assigned `CUSTOMER` by the backend.
-
-Registration rules:
-
-- First Name and Last Name are required.
-- Name length: 1–50 characters.
-- Version 1 supports Arabic and English letters.
-- Spaces, hyphens and apostrophes are allowed.
-- Numeric-only names, unsupported symbols and unsupported writing systems are rejected.
-- Email is required and must use a valid format.
-- Email uniqueness is case-insensitive.
-- Password is required.
-- Password length: 8–64 characters.
-- Password requires uppercase, lowercase, number and special character.
-- Backend validation is mandatory even if frontend validation is also implemented.
-
-Successful registration:
+The public caller does not submit `role` or `status`. The backend assigns:
 
 ```text
-Account created
-→ role = CUSTOMER
-→ status = PENDING_VERIFICATION
-→ email-verification token generated
-→ verification email sent
+role = CUSTOMER
+status = PENDING_VERIFICATION
 ```
 
-Registration must not automatically issue Access or Refresh Tokens.
+Core validation:
+
+- First/Last Name required, length 1–50.
+- Version 1 supports Arabic and English letters; spaces, hyphens and apostrophes are allowed.
+- Numeric-only names, unsupported symbols and unsupported scripts are rejected.
+- Email required, valid format, case-insensitive uniqueness.
+- Password required, 8–64 characters, uppercase + lowercase + number + special character.
+- Backend validation is mandatory even if frontend validation exists.
+- Unexpected privileged fields such as `role` are rejected.
+
+Success:
+
+```text
+201 Created
+→ CUSTOMER account created
+→ PENDING_VERIFICATION
+→ verification email/link sent
+→ no Access/Refresh Tokens
+```
+
+Duplicate email baseline:
+
+```text
+409 / EMAIL_ALREADY_REGISTERED
+```
 
 ---
 
-## Approved Role-Provisioning Model
+## Customer Email Verification
 
-Role assignment is determined by the trusted backend workflow rather than a generic client-supplied `role` field.
+Customer registration uses an **email verification link**, not a numeric OTP.
 
-```text
-Public Customer Registration
-→ CUSTOMER
-
-Administrator Customer Provisioning
-→ CUSTOMER
-
-Initial Administrator Bootstrap / Seed
-→ ADMIN
-
-Administrator Invitation Workflow
-→ ADMIN
-```
-
-Customer and Administrator provisioning remain separate backend workflows because their account lifecycles and security requirements differ.
-
----
-
-## Approved Email Verification Design
-
-Customer registration uses an **email verification link** rather than a numeric OTP.
-
-Password recovery uses a separate **6-digit OTP** flow.
-
-Email verification flow:
-
-```text
-Register
-→ account = PENDING_VERIFICATION
-→ secure random raw verification token generated
-→ token hash stored in database
-→ raw token placed in verification email link
-→ customer opens verification link
-→ frontend obtains token from link
-→ POST /api/v1/auth/verify-email
-→ backend hashes received token and compares it to the stored hash
-→ backend validates expiry / used / revoked state
-→ account becomes ACTIVE
-→ token becomes used
-```
-
-Conceptual verification request:
+Endpoint:
 
 ```http
 POST /api/v1/auth/verify-email
-Content-Type: application/json
 ```
+
+Request:
 
 ```json
 {
@@ -167,82 +133,141 @@ Content-Type: application/json
 }
 ```
 
-Approved token rules:
+Token rules:
 
-- Verification token is secure and random.
-- Token is one-time use.
-- Verification link validity is **24 hours**.
-- Expired verification links do not delete the account.
-- Expired accounts remain `PENDING_VERIFICATION` until verification succeeds.
-- A customer does not need to register again after a verification link expires.
-- Only the latest issued verification token is valid.
-- Requesting a new verification email invalidates the previously issued verification token immediately.
-- Successful verification changes `PENDING_VERIFICATION` to `ACTIVE`.
+- secure random opaque token;
+- raw token sent in email link;
+- hash stored in DB;
+- one-time use;
+- 24-hour lifetime;
+- expired link does not delete the account;
+- account remains `PENDING_VERIFICATION` until successful verification;
+- successful verification changes account to `ACTIVE`;
+- no Access/Refresh Tokens are issued by email verification.
+
+Error direction:
+
+```text
+Missing token                 → 400 / VALIDATION_ERROR
+Expired token                 → 400 / VERIFICATION_TOKEN_EXPIRED
+Invalid/revoked/old token     → 400 / INVALID_VERIFICATION_TOKEN
+```
+
+Expired is intentionally distinguishable so a future frontend can show the replacement-link action.
 
 ---
 
-## Approved Resend Verification Behavior
+## Verification Resend — Version 1 Expiry-Only Rule
+
+This section **supersedes the earlier 60-second resend rule for Customer Email Verification links**.
+
+A newly issued verification link is valid for 24 hours. While the latest link is still valid, the Customer cannot request another verification email in Version 1.
+
+```text
+Verification link issued
+→ valid for 24 hours
+→ Resend Verification Email unavailable while latest link is valid
+```
+
+When the link expires:
+
+```text
+Customer opens expired verification link
+→ verify-email returns VERIFICATION_TOKEN_EXPIRED
+→ frontend displays "Verification link expired"
+→ frontend displays [Resend Verification Email]
+→ Customer clicks the button only
+→ Customer does not re-enter the email
+→ backend identifies the pending account from the expired token record/context
+→ replacement link is sent to the email already stored on that account
+```
+
+Conceptual endpoint/request:
 
 ```http
 POST /api/v1/auth/resend-verification
 ```
 
-Core rules:
-
-- Resend cooldown: **60 seconds**.
-- The cooldown is separate from the 24-hour token lifetime.
-- A customer may request a new verification email before the current link reaches 24 hours once the cooldown has passed.
-- Resend generates a new verification token.
-- Resend invalidates the previously issued token.
-- Only the newest verification link may activate the account.
-- A customer with an expired link remains able to request a new verification email without re-registration.
-- A successful resend must not create a duplicate customer account.
-
-Important QA scenarios include:
-
-> Verify that requesting a new verification email invalidates the previously issued verification link and only the latest verification link can activate the account.
-
-> Verify that a successfully used verification link cannot be reused.
-
-> Verify that a customer with an expired verification link can request a new verification email and activate the existing account without registering again.
-
----
-
-## Approved Initial Administrator Bootstrap
-
-The first Administrator is not publicly registered. The account is created through secure bootstrap / seed setup.
-
-Approved behavior:
-
-- Backend assigns `role = ADMIN`.
-- Bootstrap must be idempotent and must not create duplicate initial Admin accounts.
-- Initial credentials must come from secure environment configuration, not hard-coded source code.
-- The initial password is temporary.
-- The initial Admin must replace the temporary password during the first successful sign-in flow before receiving normal privileged access.
-- After successful password replacement, the original temporary password becomes invalid.
-- A database flag such as `must_change_password` may be used to enforce this lifecycle.
-- Admin second-step email verification remains mandatory before an authenticated Admin session is issued.
-
-Conceptual first-Admin flow:
-
-```text
-Secure bootstrap / seed
-→ ADMIN account with temporary password
-→ first sign-in credentials accepted
-→ email OTP challenge
-→ OTP verified
-→ forced password change
-→ temporary password invalidated
-→ Access Token + Refresh Token issued
+```json
+{
+  "token": "<expired-verification-token>"
+}
 ```
 
-The exact ordering between OTP completion and forced password-change API calls will be frozen in the Login API contract, but neither step may be bypassed before privileged session issuance.
+Success baseline:
+
+```text
+200 OK
+```
+
+```json
+{
+  "message": "A new verification email has been sent."
+}
+```
+
+Rules:
+
+- resend is allowed only when the account's latest verification token/link is expired;
+- a new verification token receives a new 24-hour lifetime;
+- previous/expired tokens remain unusable for activation;
+- the same Customer account is reused; no duplicate account is created;
+- the destination email cannot be changed from this resend flow;
+- once a replacement link is issued, resend becomes unavailable again until that latest link expires;
+- an older expired token cannot be reused to repeatedly trigger replacement emails while a newer link is active.
+
+The exact HTTP status/business code for an API resend attempt while a newer verification link is still valid is still to be frozen in the API-contract review.
+
+**Important distinction:** the 60-second resend cooldown still applies to short-lived OTP flows where separately defined, such as Admin Login OTP and Password Recovery OTP. It no longer applies to Customer Email Verification links.
 
 ---
 
-## Approved Additional Administrator Invitation Flow
+## Role Provisioning
 
-Additional Admins are created through an authenticated Administrator invitation workflow.
+Role assignment comes from trusted backend workflows, not a generic client-supplied role field:
+
+```text
+Public Customer Registration → CUSTOMER
+Admin Customer Provisioning  → CUSTOMER
+Initial Admin Bootstrap      → ADMIN
+Admin Invitation Workflow    → ADMIN
+```
+
+---
+
+## First Administrator Bootstrap
+
+The first Admin is created through secure bootstrap/seed, not public registration.
+
+Rules:
+
+- backend assigns `ADMIN`;
+- bootstrap is idempotent;
+- credentials come from environment configuration, not hard-coded source;
+- initial password is temporary;
+- `must_change_password` may track the required first password change;
+- Admin Email OTP remains mandatory during login.
+
+First Admin user-facing flow:
+
+```text
+Email + Temporary Password
+→ Admin Email OTP
+→ OTP verified
+→ mandatory Change Password screen
+→ Current Password + New Password + Confirm New Password
+→ temporary password invalidated
+→ must_change_password = false
+→ normal privileged Admin session
+```
+
+The first Admin cannot access normal privileged functions before replacing the temporary password.
+
+---
+
+## Additional Administrator Invitation
+
+Only an authenticated `ADMIN` can invite another Admin.
 
 Conceptual endpoint:
 
@@ -251,255 +276,258 @@ POST /api/v1/admin/admin-invitations
 Authorization: Bearer <admin-access-token>
 ```
 
-Conceptual request:
+Invitation rules:
 
-```json
-{
-  "firstName": "Ahmad",
-  "lastName": "Ali",
-  "email": "ahmad@company.com"
-}
-```
+- no public Admin registration;
+- Customer cannot create Admin invitation;
+- invitee does not submit a generic `role` field;
+- backend assigns `ADMIN` through the trusted invitation workflow;
+- inviter does not choose the invitee password;
+- invitee chooses their own password while accepting the invitation;
+- invitation lifetime = 24 hours;
+- invitation is one-time use;
+- newest invitation only;
+- expired/used/revoked/invalid invitation cannot create an Admin;
+- expired invitation creates no account; an authorized Admin must issue another invitation;
+- accepting a valid invitation creates the Admin account but does not automatically log it in.
 
-Rules:
-
-- Only an authenticated and authorized `ADMIN` may invite another Admin.
-- An authenticated `CUSTOMER` attempting this operation is forbidden.
-- The request does not contain a generic `role` field.
-- The backend assigns `ADMIN` through the trusted invitation workflow.
-- The inviting Admin does not choose the invited Admin's password.
-- The invited person chooses their own password when accepting the invitation.
-- Admin invitation lifetime is **24 hours**.
-- The invitation is one-time use.
-- Resend / new invitation invalidates the previously issued invitation immediately.
-- Only the latest Admin invitation token is valid.
-- Used, expired, invalid or revoked invitations cannot create an Admin account.
-- Expiration of an invitation does not create an Admin account automatically.
-- After expiry, an authorized Admin must send a new invitation.
-- Invitation acceptance must not create duplicate accounts for the same email.
-
-Conceptual flow:
-
-```text
-Existing ADMIN
-→ create Admin invitation
-→ raw invitation token sent by email
-→ token hash stored in DB
-→ invitee opens valid link within 24 hours
-→ invitee chooses valid password
-→ backend creates account
-→ backend assigns role = ADMIN
-→ invitation marked used
-→ Admin account can later authenticate using password + mandatory email OTP
-```
-
-Expected status-code baseline for reviewed scenarios:
-
-```text
-Valid Admin invitation creation                → 201 Created
-Authenticated CUSTOMER tries Admin invitation  → 403 Forbidden
-Expired Admin invitation acceptance            → 400 Bad Request
-Revoked/old invitation after resend             → 400 Bad Request
-Valid invitation acceptance + account creation → 201 Created
-Missing/invalid authentication on admin API     → 401 Unauthorized
-```
-
-For invalid / expired / used / revoked invitation tokens, the contract should use a generic error response such as `INVALID_INVITATION` rather than exposing unnecessary token-state details.
+After account creation, normal Admin login still requires Email + Password + Admin Email OTP.
 
 ---
 
-## Approved Admin Email OTP / Second-Step Authentication
+## Login Account-State Behavior
 
-For this project, Administrator second-step authentication uses a **6-digit verification code sent to the Administrator's email**. No authenticator application is required.
-
-Important distinction:
+Customer normal login:
 
 ```text
-Admin Invitation Email
-→ account provisioning / invitation acceptance
-
-Admin Login Email OTP
-→ second authentication step during login
+ACTIVE + valid credentials
+→ Access + Refresh Tokens
+→ no OTP in Version 1
 ```
 
-Admin login behavior:
+Baseline outcomes:
+
+```text
+Invalid email/password                     → 401 Unauthorized / generic failure
+Correct credentials + PENDING_VERIFICATION → 403 / EMAIL_VERIFICATION_REQUIRED
+Correct credentials + DISABLED             → 403 / ACCOUNT_DISABLED
+Temporary account lock active              → 423 Locked
+Rate limit exceeded                         → 429 Too Many Requests
+```
+
+Wrong credentials must not disclose account existence or account state.
+
+---
+
+## Account Lockout and Login Rate Limiting
+
+Account Lockout applies to Customer and Admin password authentication:
+
+```text
+5 consecutive failed passwords
+→ temporary lock for 15 minutes
+```
+
+Successful authentication before the fifth failure resets the failure sequence.
+
+Temporary lock is separate from business status `DISABLED`.
+
+Login Rate Limiting is also separate from Account Lockout:
+
+```text
+Per account/email → 10 login requests / minute
+Per source IP     → 60 login requests / minute
+Exceeded          → 429 Too Many Requests
+```
+
+The system does not rely on IP-only limiting as the sole control. Thresholds are configurable.
+
+---
+
+## Admin Login OTP
+
+Admin login adds a mandatory second authentication step after correct Email + Password.
 
 ```text
 Email + Password
+→ Login Rate Limiting / Account Lockout protections
 → credentials valid
-→ backend detects role = ADMIN
-→ generate 6-digit email OTP
-→ store OTP hash / challenge state
-→ send raw OTP by email
-→ do NOT issue Access/Refresh tokens yet
-→ Admin submits OTP
-→ backend validates challenge / expiry / attempts / used state
-→ if valid, authentication completes
-→ Access Token + Refresh Token issued
+→ generate/send 6-digit Email OTP
+→ no normal Access/Refresh Tokens yet
+→ Admin verifies OTP
+→ authentication completes
 ```
 
-Approved principles:
+Approved Admin Login OTP rules:
 
-- Password success alone is not a completed Admin login.
-- Access and Refresh Tokens are not issued until the email OTP step succeeds.
-- The OTP is one-time use.
-- A new OTP invalidates the previous OTP.
-- OTP material should not be stored in plaintext when avoidable; a hash should be stored.
-- Email delivery failure must never bypass the second authentication step.
-- Admin second-step verification is required for every new login session in Version 1.
-- Trusted-device / remember-this-device behavior is out of scope for Version 1.
+```text
+Format              → 6 digits
+Validity            → 5 minutes
+Max failed attempts → 5
+Resend cooldown     → 60 seconds
+Newest OTP only     → yes
+One-time use        → yes
+```
 
-The exact Admin login OTP lifetime, maximum failed attempts, resend cooldown and recovery rules will be frozen during the Login API contract review. The current design direction is a short-lived code with attempt limits and resend protection.
+Five wrong OTP attempts invalidate the current OTP challenge; they do not set the Admin account to `DISABLED`.
 
 ---
 
-## Token Fundamentals Adopted for the Project
-
-A token is a value used to prove or represent a specific action, authorization or state.
-
-For opaque verification / invitation tokens:
+## Refresh Token and Logout
 
 ```text
-Backend generates secure random RAW TOKEN
-→ RAW TOKEN is sent to the user in the email link
-→ Backend hashes the token
-→ Database stores TOKEN HASH, not raw token
-
-User later submits RAW TOKEN
-→ Backend hashes received token using the same algorithm
-→ compares resulting hash with stored token_hash
-→ if hash matches, then also checks expiry / used / revoked state
+Access Token lifetime  → 15 minutes
+Refresh Token lifetime → 7 days
 ```
 
-Example storage model:
+Refresh uses rotation:
 
 ```text
-created_at  → when token/invitation was issued
-expires_at  → last validity point
-used_at     → when successfully consumed; NULL before use
-revoked_at  → when explicitly invalidated; NULL while not revoked
+Valid Refresh Token
+→ old Refresh Token invalidated
+→ new Access Token
+→ new Refresh Token
 ```
 
-Validity requires more than a matching hash:
+A rotated/used Refresh Token cannot be reused. A `DISABLED` account cannot refresh.
+
+Logout applies to Customer and Admin:
 
 ```text
-token hash matches
-AND NOW < expires_at
-AND used_at IS NULL
-AND revoked_at IS NULL
+Logout
+→ current session invalidated
+→ current Refresh Token invalidated
+→ full authentication required for a new session
 ```
 
-Token hashes are one-way fingerprints and are not the same as encryption.
+Redis or equivalent server-side revocation/session state may support this behavior.
 
-For invitation and verification flows, token expiry is controlled by backend business logic / configuration and persisted as `expires_at` in the database. Example configuration direction:
+---
+
+## Password Recovery / Reset
+
+Password Recovery applies to Customer and Admin and is separate from Customer Email Verification and Admin Login OTP.
+
+Public forgot-password responses are generic to reduce account-enumeration risk.
+
+Password Recovery OTP:
+
+```text
+Format              → 6 digits
+Validity            → 5 minutes
+Max failed attempts → 5
+Resend cooldown     → 60 seconds
+Newest OTP only     → yes
+One-time use        → yes
+```
+
+Successful reset:
+
+```text
+new password stored securely
+→ old password invalid
+→ existing sessions invalidated
+→ existing Refresh Tokens invalidated
+→ user signs in again
+```
+
+Admin still completes the normal Admin Email OTP step on the next login.
+
+---
+
+## Token Fundamentals
+
+For opaque verification/invitation tokens:
+
+```text
+Backend generates RAW TOKEN
+→ raw token sent to user
+→ hash stored in DB
+
+User submits raw token
+→ backend hashes submitted token
+→ compares against stored hash
+→ checks expiry / used / revoked state
+```
+
+Common token state fields:
+
+```text
+created_at
+expires_at
+used_at
+revoked_at
+```
+
+Use UTC consistently for stored timestamps.
+
+Configuration direction should keep different resend concepts separate, for example:
 
 ```text
 EMAIL_VERIFICATION_EXPIRY_HOURS=24
 ADMIN_INVITATION_EXPIRY_HOURS=24
-RESEND_COOLDOWN_SECONDS=60
+ADMIN_OTP_RESEND_COOLDOWN_SECONDS=60
+PASSWORD_RESET_OTP_RESEND_COOLDOWN_SECONDS=60
 ```
 
-Backend calculation concept:
-
-```text
-created_at = current time
-expires_at = current time + configured lifetime
-```
-
-Store server/database timestamps consistently, preferably UTC, and convert only for user-facing display when necessary.
-
-For QA environments, expiry scenarios may be tested by controlled test data, adjusting test configuration, or setting `expires_at` into the past rather than physically waiting 24 hours.
+Do not use a generic verification-link `RESEND_COOLDOWN_SECONDS=60` setting; verification-link resend in Version 1 is controlled by latest-link expiry.
 
 ---
 
-## Authentication Token Distinction
+## Frontend Future Option
 
-Do not confuse token types:
+Frontend is optional after the backend/API project, but the API should remain frontend-ready:
+
+- stable business/error codes;
+- clear success/failure responses;
+- backend remains source of truth;
+- verification, invitation, OTP and forced-password-change flows map cleanly to future screens.
+
+Potential later phase:
 
 ```text
-Email Verification Token
-→ verifies customer email ownership
-→ opaque random secret
-→ one-time use
-→ 24-hour lifetime
-
-Admin Invitation Token
-→ proves possession of a valid Admin invitation
-→ opaque random secret
-→ one-time use
-→ 24-hour lifetime
-
-Admin Login OTP
-→ six-digit email verification code
-→ second step for Admin login
-→ short-lived and one-time use
-
-Access Token
-→ authenticates protected API requests
-→ issued only after completed login
-→ 15-minute lifetime
-
-Refresh Token
-→ obtains replacement Access Tokens
-→ issued only after completed login
-→ 7-day lifetime with rotation
+Backend/API complete
+→ Frontend implementation
+→ UI Functional Testing
+→ API/UI Integration Testing
+→ End-to-End Testing
+→ Cross-browser / Responsive Testing
+→ Regression
 ```
-
-An expired Access Token on a protected endpoint normally produces `401 Unauthorized`.
-
-Expired email-verification or invitation credentials are not Access Token authentication failures; their exact API error responses are defined by their own endpoint contracts.
 
 ---
 
-## QA Learning Focus
+## QA Working Style
 
-The project explicitly builds practical skill in:
+Current phase is fast-track:
 
-- Test Conditions
-- Test Scenarios
-- Test Cases
-- Positive Testing
-- Negative Testing
-- Boundary Testing
-- Security Testing
-- API Status Codes
-- Database Validation
-- UAT Scenarios
-- Requirements / Acceptance Criteria traceability
+```text
+Requirement
+→ Business Logic
+→ Clarification
+→ API Behavior
+→ Test Scenario
+→ UAT
+```
 
-Test Scenario principle:
+Do not spend extended time on testing techniques such as Decision Tables unless needed to clarify a requirement.
 
-> A Test Scenario describes the behavior or business condition that QA needs to validate.
+Later execution phase:
 
-UAT principle:
-
-> A UAT Scenario validates whether the delivered behavior satisfies the real business or end-user need without depending on low-level technical implementation details.
-
-Approved examples include:
-
-**Test Scenario**
-
-> Verify that requesting a new verification email invalidates the previously issued verification link.
-
-**UAT Scenario**
-
-> As an unverified customer, I can request a new verification email and use the latest link to activate my existing account without registering again.
-
-**Admin UAT**
-
-> As the initial Administrator, I must replace the temporary system-provided password with my own secure password before using privileged functionality.
-
-> As an authorized Administrator, I can invite another Administrator without allowing public users or Customers to create Admin accounts.
-
-> As an invited Administrator, I can accept a valid invitation, choose my password and create my Administrator account.
-
-> As an Administrator, I must verify a code sent to my email before I can complete login and access administrative functionality.
+```text
+Detailed Test Cases
+→ Postman
+→ SQL / DB Validation
+→ Defects
+→ Retest
+→ Regression
+```
 
 ---
 
 ## Planned Final QA Artifacts
 
-Before project completion, create and commit dedicated portfolio-ready files for at least:
+Before project completion maintain portfolio-ready files for:
 
 ```text
 qa/test-scenarios/
@@ -510,11 +538,9 @@ qa/execution-reports/
 qa/regression/
 ```
 
-The final Test Scenario and UAT files must consolidate approved scenarios from all completed modules rather than relying only on conversation history.
-
 ---
 
-## Environment Direction
+## Backend Direction
 
 Planned stack:
 
@@ -528,7 +554,7 @@ Planned stack:
 - Mailpit
 - Docker Compose
 
-Backend layering:
+Layering:
 
 ```text
 Route
@@ -539,81 +565,16 @@ Route
 → PostgreSQL
 ```
 
----
+Engineering standards include strict typing where practical, clear modules, thin controllers, business logic in services, repositories for DB access, centralized errors, no hard-coded secrets, `.env.example`, secure password/token handling, migrations/seeds/bootstrap, transactions, ESLint/formatting, aligned OpenAPI, developer-level automated tests where appropriate and Dockerized setup.
 
-## Backend Engineering and Clean-Code Standard
-
-When backend implementation begins, the backend source code must be maintained in GitHub and treated as a real software project rather than disposable demo code.
-
-Expected engineering standards:
-
-- TypeScript strict typing where practical.
-- Clear module boundaries by business domain.
-- Thin Routes and Controllers.
-- Business rules primarily in Services.
-- Database access isolated in Repositories.
-- Request validation separated from Controllers.
-- Authentication and Authorization enforced through dedicated middleware/services.
-- Centralized error handling and consistent API error responses.
-- No hard-coded secrets, passwords, tokens, connection strings or environment-specific credentials.
-- Environment configuration loaded from environment variables with a safe `.env.example`.
-- Secure password hashing and token handling.
-- Database migrations and controlled seed/bootstrap scripts.
-- Proper transactions for multi-step business operations.
-- Meaningful names, small focused functions and minimal duplicated logic.
-- ESLint / formatting standards applied consistently.
-- OpenAPI contract and implementation kept aligned.
-- Important backend behavior covered by developer-level automated tests where appropriate while QA remains independent.
-- Docker setup must allow the full environment to start consistently.
-
-Target module structure:
-
-```text
-src/
-├── config/
-├── db/
-│   ├── migrations/
-│   └── seeds/
-├── modules/
-│   ├── auth/
-│   ├── users/
-│   ├── products/
-│   ├── cart/
-│   ├── inventory/
-│   ├── orders/
-│   ├── invoices/
-│   ├── returns/
-│   ├── payments/
-│   └── bulk-import/
-├── middleware/
-├── services/
-├── utils/
-├── app.ts
-└── server.ts
-```
-
-Backend repository visibility is **not yet finalized**. The backend will be version-controlled in GitHub, but the final choice between a public or private source repository will be made later. The public QA portfolio must not expose any hidden seeded-bug answer key.
+Backend source will be version-controlled in GitHub. Public/private visibility remains undecided. The public QA portfolio must not expose hidden seeded-bug answer keys.
 
 ---
 
-## Next Step
+## Immediate Next Step
 
-Continue Authentication with the **Login API contract**.
+Continue the Authentication API Contract from `POST /api/v1/auth/resend-verification` and freeze the remaining resend error behavior.
 
-The next review must cover both:
+Then continue endpoint-by-endpoint through Admin provisioning, Login, Admin OTP, temporary-password change, Refresh, Logout and Password Recovery/Reset.
 
-```text
-Customer Login
-→ Email + Password
-→ successful authentication
-→ Access Token + Refresh Token
-
-Admin Login
-→ Email + Password
-→ Email OTP challenge
-→ OTP verification
-→ if initial bootstrap Admin and temporary password is still active: forced password replacement
-→ Access Token + Refresh Token only after all required steps complete
-```
-
-Login review must include validation, account-state rules, generic credential failures, account-enumeration protection, lockout, rate limiting, Admin OTP behavior, token issuance and expected HTTP status codes.
+After the Authentication API Contract is frozen, **stop for discussion before starting backend implementation**.
