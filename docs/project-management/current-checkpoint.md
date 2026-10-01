@@ -16,7 +16,7 @@ Authentication requirements/business behavior are substantially complete. Curren
 
 Detailed Test Cases remain deferred until the backend exists and Postman/PostgreSQL execution begins.
 
-Current delivery strategy is incremental by module:
+Current delivery strategy:
 
 ```text
 Requirements
@@ -32,7 +32,7 @@ Requirements
 → Regression
 ```
 
-Do not wait for Product/Cart/Order requirements before testing Authentication. Finish the Authentication contract, build the Authentication backend, then test it against Requirements + API Contract.
+**Important:** Before backend implementation begins, stop and discuss the backend plan with the user first.
 
 ---
 
@@ -43,8 +43,9 @@ Frozen in endpoint-by-endpoint review:
 ```text
 Customer Registration ✅
 Customer Email Verification ✅
-Expired-link Resend Verification UX ✅
-Resend available only after latest verification link expires ✅
+Verification link lifetime = 24 hours ✅
+Customer verification resend cooldown = 60 seconds ✅
+Expired-link Resend UX ✅
 Resend success = 200 OK ✅
 ```
 
@@ -52,12 +53,10 @@ Next immediate task:
 
 ```text
 POST /api/v1/auth/resend-verification
-→ freeze remaining error responses/status codes
+→ freeze cooldown error response/status code
 ```
 
 Then continue through Admin provisioning, Login, Admin OTP, temporary-password change, Refresh, Logout, and Password Recovery/Reset.
-
-**Important:** Before backend implementation begins, stop and discuss the backend plan with the user first.
 
 ---
 
@@ -155,30 +154,35 @@ Expired is intentionally distinguishable so a future frontend can guide the Cust
 
 ---
 
-## Frozen Expired-Link Resend UX
+## Frozen Verification Resend Behavior
 
-This decision supersedes the earlier 60-second resend rule for **Customer Email Verification links**.
-
-Version 1 user experience:
+The project distinguishes **verification-link lifetime** from **resend cooldown**:
 
 ```text
-Registration
-→ verification link sent
-→ link remains valid for 24 hours
-→ Resend Verification Email is unavailable while that latest link is valid
+Verification link lifetime = 24 hours
+Resend cooldown            = 60 seconds
 ```
 
-After the latest link expires:
+The 60-second cooldown does not expire the verification link. It only controls when another verification email may be requested.
+
+User experience:
 
 ```text
-Customer opens verification link
-→ verify-email determines that token is expired
-→ frontend displays "Verification link expired"
-→ frontend displays [Resend Verification Email]
-→ Customer clicks the button only
-→ Customer does NOT type the email again
-→ backend identifies the original pending account from the expired token record/context
-→ backend sends a new verification link to the email already stored on that account
+Verification email sent
+→ Resend button disabled for 60 seconds
+→ after 60 seconds, button becomes enabled if account is still PENDING_VERIFICATION
+```
+
+If the Customer opens an expired verification link:
+
+```text
+verify-email returns VERIFICATION_TOKEN_EXPIRED
+→ frontend shows "Verification link expired"
+→ frontend shows [Resend Verification Email]
+→ Customer clicks only
+→ Customer does not type the email again
+→ backend resolves the existing pending account from token/context
+→ replacement email goes to the email already stored on that account
 ```
 
 Conceptual resend request:
@@ -189,7 +193,7 @@ POST /api/v1/auth/resend-verification
 
 ```json
 {
-  "token": "<expired-verification-token>"
+  "token": "<verification-token>"
 }
 ```
 
@@ -205,29 +209,26 @@ Success:
 }
 ```
 
-Important rules:
+Rules:
 
 ```text
-Expired token cannot activate account
-BUT
-its stored record can identify which pending account it belonged to
+Before 60 seconds
+→ frontend keeps button disabled
+→ backend must also reject direct API attempts
 
-Latest verification link still valid
-→ resend unavailable / must be rejected by backend
-
-Latest verification link expired
-→ resend allowed
-→ new verification link valid for 24 hours
-→ resend unavailable again while new link is valid
+After 60 seconds
+→ resend allowed while account remains PENDING_VERIFICATION
+→ new verification token generated
+→ new link valid for 24 hours
+→ previous verification token invalid immediately
+→ only newest link can activate account
+→ same Customer account remains
+→ no duplicate account
 ```
 
-The user cannot change the destination email from this flow. The same Customer account remains; no duplicate account is created.
+Frontend disabling is not sufficient security/business enforcement because a caller can use Postman/curl directly.
 
-An older expired token must not be reusable to repeatedly trigger new emails while a newer verification link is active.
-
-The **60-second resend cooldown remains unchanged for OTP flows** such as Admin Login OTP and Password Recovery OTP; it no longer applies to Customer Email Verification links.
-
-Exact status/code for an API resend attempt while a newer verification link is still valid is the next contract decision.
+The exact status/code for a resend during the 60-second cooldown is the next contract decision.
 
 ---
 
@@ -325,5 +326,3 @@ Successful password reset invalidates old password, existing sessions, and exist
 ## Frontend Future Option
 
 Frontend is optional later, but APIs should remain frontend-ready with stable business/error codes and flows that can map cleanly to UI screens.
-
-Current expired-link decision is intentionally designed with that future frontend in mind.
