@@ -55,8 +55,9 @@ Completed/frozen at the current contract level:
 ```text
 Customer Registration ✅
 Customer Email Verification ✅
+Verification link lifetime = 24 hours ✅
+Customer verification resend cooldown = 60 seconds ✅
 Expired-link Verification Resend UX ✅
-Verification resend available only after link expiry ✅
 ```
 
 Detailed Test Cases remain intentionally deferred until the Authentication backend is running and Postman execution begins.
@@ -157,19 +158,28 @@ Expired is intentionally distinguishable so a future frontend can show the repla
 
 ---
 
-## Verification Resend — Version 1 Expiry-Only Rule
+## Verification Resend — Version 1 Rule
 
-This section **supersedes the earlier 60-second resend rule for Customer Email Verification links**.
-
-A newly issued verification link is valid for 24 hours. While the latest link is still valid, the Customer cannot request another verification email in Version 1.
+Verification-link lifetime and resend cooldown are separate concepts:
 
 ```text
-Verification link issued
-→ valid for 24 hours
-→ Resend Verification Email unavailable while latest link is valid
+Verification link lifetime = 24 hours
+Resend cooldown            = 60 seconds
 ```
 
-When the link expires:
+The verification link does not expire after 60 seconds. The 60 seconds only control when the Customer may request another verification email.
+
+User-facing behavior:
+
+```text
+Verification email sent
+→ Resend button disabled for 60 seconds
+→ after 60 seconds, Resend becomes available if account is still PENDING_VERIFICATION
+```
+
+This is useful when the first email is delayed, lost, deleted or not noticed, and it also keeps QA testing practical without waiting 24 hours.
+
+If the link itself expires after 24 hours:
 
 ```text
 Customer opens expired verification link
@@ -190,7 +200,7 @@ POST /api/v1/auth/resend-verification
 
 ```json
 {
-  "token": "<expired-verification-token>"
+  "token": "<verification-token>"
 }
 ```
 
@@ -208,17 +218,16 @@ Success baseline:
 
 Rules:
 
-- resend is allowed only when the account's latest verification token/link is expired;
-- a new verification token receives a new 24-hour lifetime;
-- previous/expired tokens remain unusable for activation;
+- resend before 60 seconds is rejected;
+- resend after 60 seconds is allowed if the account remains `PENDING_VERIFICATION`;
+- successful resend creates a new verification token with a fresh 24-hour lifetime;
+- successful resend invalidates the previous verification token immediately;
+- only the newest verification link may activate the account;
 - the same Customer account is reused; no duplicate account is created;
-- the destination email cannot be changed from this resend flow;
-- once a replacement link is issued, resend becomes unavailable again until that latest link expires;
-- an older expired token cannot be reused to repeatedly trigger replacement emails while a newer link is active.
+- the destination email cannot be changed from the expired-link resend flow;
+- frontend disabling is only UX; backend must enforce the cooldown against direct API calls.
 
-The exact HTTP status/business code for an API resend attempt while a newer verification link is still valid is still to be frozen in the API-contract review.
-
-**Important distinction:** the 60-second resend cooldown still applies to short-lived OTP flows where separately defined, such as Admin Login OTP and Password Recovery OTP. It no longer applies to Customer Email Verification links.
+The exact HTTP status/business code for a resend attempt during the cooldown remains to be frozen in the API-contract review.
 
 ---
 
@@ -288,7 +297,6 @@ Invitation rules:
 - invitation is one-time use;
 - newest invitation only;
 - expired/used/revoked/invalid invitation cannot create an Admin;
-- expired invitation creates no account; an authorized Admin must issue another invitation;
 - accepting a valid invitation creates the Admin account but does not automatically log it in.
 
 After account creation, normal Admin login still requires Email + Password + Admin Email OTP.
@@ -332,15 +340,13 @@ Successful authentication before the fifth failure resets the failure sequence.
 
 Temporary lock is separate from business status `DISABLED`.
 
-Login Rate Limiting is also separate from Account Lockout:
+Login Rate Limiting:
 
 ```text
 Per account/email → 10 login requests / minute
 Per source IP     → 60 login requests / minute
 Exceeded          → 429 Too Many Requests
 ```
-
-The system does not rely on IP-only limiting as the sole control. Thresholds are configurable.
 
 ---
 
@@ -400,15 +406,11 @@ Logout
 → full authentication required for a new session
 ```
 
-Redis or equivalent server-side revocation/session state may support this behavior.
-
 ---
 
 ## Password Recovery / Reset
 
 Password Recovery applies to Customer and Admin and is separate from Customer Email Verification and Admin Login OTP.
-
-Public forgot-password responses are generic to reduce account-enumeration risk.
 
 Password Recovery OTP:
 
@@ -421,17 +423,7 @@ Newest OTP only     → yes
 One-time use        → yes
 ```
 
-Successful reset:
-
-```text
-new password stored securely
-→ old password invalid
-→ existing sessions invalidated
-→ existing Refresh Tokens invalidated
-→ user signs in again
-```
-
-Admin still completes the normal Admin Email OTP step on the next login.
+Successful reset invalidates the old password, existing sessions and existing Refresh Tokens. Admin still completes the normal Admin Email OTP step on the next login.
 
 ---
 
@@ -461,39 +453,21 @@ revoked_at
 
 Use UTC consistently for stored timestamps.
 
-Configuration direction should keep different resend concepts separate, for example:
+Configuration direction:
 
 ```text
 EMAIL_VERIFICATION_EXPIRY_HOURS=24
+EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS=60
 ADMIN_INVITATION_EXPIRY_HOURS=24
 ADMIN_OTP_RESEND_COOLDOWN_SECONDS=60
 PASSWORD_RESET_OTP_RESEND_COOLDOWN_SECONDS=60
 ```
 
-Do not use a generic verification-link `RESEND_COOLDOWN_SECONDS=60` setting; verification-link resend in Version 1 is controlled by latest-link expiry.
-
 ---
 
 ## Frontend Future Option
 
-Frontend is optional after the backend/API project, but the API should remain frontend-ready:
-
-- stable business/error codes;
-- clear success/failure responses;
-- backend remains source of truth;
-- verification, invitation, OTP and forced-password-change flows map cleanly to future screens.
-
-Potential later phase:
-
-```text
-Backend/API complete
-→ Frontend implementation
-→ UI Functional Testing
-→ API/UI Integration Testing
-→ End-to-End Testing
-→ Cross-browser / Responsive Testing
-→ Regression
-```
+Frontend is optional after the backend/API project, but the API should remain frontend-ready with stable business/error codes, clear success/failure responses and backend-enforced business/security rules.
 
 ---
 
@@ -510,8 +484,6 @@ Requirement
 → UAT
 ```
 
-Do not spend extended time on testing techniques such as Decision Tables unless needed to clarify a requirement.
-
 Later execution phase:
 
 ```text
@@ -526,8 +498,6 @@ Detailed Test Cases
 ---
 
 ## Planned Final QA Artifacts
-
-Before project completion maintain portfolio-ready files for:
 
 ```text
 qa/test-scenarios/
@@ -565,15 +535,13 @@ Route
 → PostgreSQL
 ```
 
-Engineering standards include strict typing where practical, clear modules, thin controllers, business logic in services, repositories for DB access, centralized errors, no hard-coded secrets, `.env.example`, secure password/token handling, migrations/seeds/bootstrap, transactions, ESLint/formatting, aligned OpenAPI, developer-level automated tests where appropriate and Dockerized setup.
-
 Backend source will be version-controlled in GitHub. Public/private visibility remains undecided. The public QA portfolio must not expose hidden seeded-bug answer keys.
 
 ---
 
 ## Immediate Next Step
 
-Continue the Authentication API Contract from `POST /api/v1/auth/resend-verification` and freeze the remaining resend error behavior.
+Continue the Authentication API Contract from `POST /api/v1/auth/resend-verification` and freeze the cooldown error behavior.
 
 Then continue endpoint-by-endpoint through Admin provisioning, Login, Admin OTP, temporary-password change, Refresh, Logout and Password Recovery/Reset.
 
