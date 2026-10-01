@@ -43,16 +43,16 @@ Frozen in endpoint-by-endpoint review:
 ```text
 Customer Registration ✅
 Customer Email Verification ✅
-Expired-link Resend Verification UX direction ✅
+Expired-link Resend Verification UX ✅
+Resend available only after latest verification link expires ✅
+Resend success = 200 OK ✅
 ```
 
 Next immediate task:
 
 ```text
 POST /api/v1/auth/resend-verification
-→ freeze request
-→ success response
-→ error responses/status codes
+→ freeze remaining error responses/status codes
 ```
 
 Then continue through Admin provisioning, Login, Admin OTP, temporary-password change, Refresh, Logout, and Password Recovery/Reset.
@@ -155,11 +155,20 @@ Expired is intentionally distinguishable so a future frontend can guide the Cust
 
 ---
 
-## Approved Expired-Link Resend UX
+## Frozen Expired-Link Resend UX
 
-This decision replaces any earlier assumption that the Customer must re-enter the email address after opening an expired verification link.
+This decision supersedes the earlier 60-second resend rule for **Customer Email Verification links**.
 
-Preferred Version 1 user experience:
+Version 1 user experience:
+
+```text
+Registration
+→ verification link sent
+→ link remains valid for 24 hours
+→ Resend Verification Email is unavailable while that latest link is valid
+```
+
+After the latest link expires:
 
 ```text
 Customer opens verification link
@@ -172,7 +181,7 @@ Customer opens verification link
 → backend sends a new verification link to the email already stored on that account
 ```
 
-Conceptual resend request direction:
+Conceptual resend request:
 
 ```http
 POST /api/v1/auth/resend-verification
@@ -184,28 +193,41 @@ POST /api/v1/auth/resend-verification
 }
 ```
 
+Success:
+
+```text
+200 OK
+```
+
+```json
+{
+  "message": "A new verification email has been sent."
+}
+```
+
 Important rules:
 
 ```text
 Expired token cannot activate account
 BUT
-its stored record can still identify which pending account it belonged to
+its stored record can identify which pending account it belonged to
+
+Latest verification link still valid
+→ resend unavailable / must be rejected by backend
+
+Latest verification link expired
+→ resend allowed
+→ new verification link valid for 24 hours
+→ resend unavailable again while new link is valid
 ```
 
-The user must not be able to change the destination email from the expired-link resend screen.
+The user cannot change the destination email from this flow. The same Customer account remains; no duplicate account is created.
 
-Resend still follows:
+An older expired token must not be reusable to repeatedly trigger new emails while a newer verification link is active.
 
-```text
-60-second cooldown
-→ new verification token generated
-→ previous verification token invalidated
-→ only newest link can activate account
-→ same existing Customer account remains
-→ no duplicate account
-```
+The **60-second resend cooldown remains unchanged for OTP flows** such as Admin Login OTP and Password Recovery OTP; it no longer applies to Customer Email Verification links.
 
-Exact resend success/error response is the current next contract decision.
+Exact status/code for an API resend attempt while a newer verification link is still valid is the next contract decision.
 
 ---
 
