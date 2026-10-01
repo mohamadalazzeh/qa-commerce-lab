@@ -4,7 +4,7 @@
 
 This is the current API-contract working draft for the Authentication module.
 
-Authentication business behavior is frozen at a high level. Exact request/response bodies and final error schemas will be reviewed endpoint-by-endpoint before backend implementation.
+Authentication business behavior is frozen at a high level. Exact request/response bodies and final error schemas are reviewed endpoint-by-endpoint before backend implementation.
 
 Detailed QA Test Cases remain intentionally deferred until the backend is implemented and Postman execution begins.
 
@@ -32,6 +32,158 @@ POST /api/v1/auth/reset-password
 POST /api/v1/admin/admin-invitations
 POST /api/v1/auth/admin-invitations/accept
 ```
+
+---
+
+## 1. Customer Registration — Frozen Contract
+
+### Request
+
+```http
+POST /api/v1/auth/register
+Content-Type: application/json
+```
+
+```json
+{
+  "firstName": "Mohammad",
+  "lastName": "Alazzeh",
+  "email": "user@example.com",
+  "password": "Example@123"
+}
+```
+
+The caller does not submit `role` or `status`. The backend assigns:
+
+```text
+role = CUSTOMER
+status = PENDING_VERIFICATION
+```
+
+Unexpected privileged fields such as `role` are rejected rather than silently accepted.
+
+### Success
+
+```text
+201 Created
+```
+
+```json
+{
+  "message": "Registration successful. Please verify your email.",
+  "verificationRequired": true
+}
+```
+
+Registration does not issue Access or Refresh Tokens.
+
+### Baseline Errors
+
+```text
+Missing required field          → 400 / VALIDATION_ERROR
+Invalid email format            → 400 / VALIDATION_ERROR
+Invalid First/Last Name         → 400 / VALIDATION_ERROR
+Weak/invalid password           → 400 / VALIDATION_ERROR
+Unexpected field such as role   → 400 / VALIDATION_ERROR
+Duplicate email                 → 409 / EMAIL_ALREADY_REGISTERED
+```
+
+Validation errors may include field-level details for frontend use.
+
+---
+
+## 2. Customer Email Verification — Frozen Contract
+
+### Request
+
+```http
+POST /api/v1/auth/verify-email
+Content-Type: application/json
+```
+
+```json
+{
+  "token": "<verification-token>"
+}
+```
+
+The verification token identifies the existing pending account. The backend hashes the supplied raw token, locates the corresponding verification record, and validates token state.
+
+### Success
+
+A valid latest token within its 24-hour lifetime changes the account from `PENDING_VERIFICATION` to `ACTIVE` and marks the token as used.
+
+```text
+200 OK
+```
+
+```json
+{
+  "message": "Email verified successfully."
+}
+```
+
+Email verification does not automatically log the Customer in and does not issue Access or Refresh Tokens.
+
+### Error Behavior
+
+```text
+Missing token                    → 400 / VALIDATION_ERROR
+Expired token                    → 400 / VERIFICATION_TOKEN_EXPIRED
+Invalid / revoked / old token    → 400 / INVALID_VERIFICATION_TOKEN
+```
+
+An expired verification link is intentionally distinguishable from an unknown/invalid link so that a future frontend can guide the Customer to request a replacement verification email.
+
+---
+
+## 3. Resend Verification — Expired-Link UX Decision
+
+### Primary Version 1 User Flow
+
+The preferred Version 1 experience begins from the expired verification-link page.
+
+```text
+Customer opens old verification link
+→ frontend calls verify-email
+→ backend returns VERIFICATION_TOKEN_EXPIRED
+→ frontend displays an expired-link message
+→ frontend displays [Resend Verification Email]
+→ Customer clicks the button only
+→ Customer is not required to type the email again
+```
+
+The resend action uses the expired verification token/context to identify the original pending account. The backend must not require the Customer to re-enter an email address in this expired-link flow.
+
+Conceptual request direction:
+
+```http
+POST /api/v1/auth/resend-verification
+Content-Type: application/json
+```
+
+```json
+{
+  "token": "<expired-verification-token>"
+}
+```
+
+The backend may use the stored token record to resolve the associated user/account even though the token is expired. Expiry prevents activation; it does not erase the relationship between the token record and the account.
+
+### Resend Rules
+
+```text
+Resend cooldown                 → 60 seconds
+Successful resend              → generate a new verification token
+New token issued               → previous token becomes invalid
+Only newest link               → can activate the account
+Account                        → remains the same existing account
+Duplicate account              → must not be created
+```
+
+The replacement verification email is sent to the email already associated with that account. The expired-link page must not allow the caller to change the destination email.
+
+The exact success response and remaining resend error schema will be frozen next.
 
 ---
 
@@ -124,8 +276,6 @@ The system does not rely on IP-only rate limiting as the sole protection. Rate-l
 
 Only the first Admin created through bootstrap begins with a temporary password.
 
-User-facing behavior:
-
 ```text
 Email + Temporary Password
 → Admin Email OTP
@@ -157,8 +307,6 @@ Existing authenticated ADMIN
 ```
 
 Account creation does not automatically log the invited Admin in. The subsequent Admin login still requires Email + Password + Email OTP.
-
-Role assignment is controlled by the trusted backend invitation workflow; the invitee does not submit a generic `role = ADMIN` field.
 
 ---
 
@@ -232,43 +380,31 @@ An Admin who resets the password must still complete the normal Admin Email OTP 
 
 A frontend is optional and may be implemented after the backend/API project is complete.
 
-The Authentication API should therefore remain frontend-ready:
-
-- stable business/error codes for UI routing;
-- clear success/failure responses;
-- backend remains the source of truth for business/security rules;
-- invitation, verification, OTP and mandatory-password-change flows must map cleanly to future UI screens;
-- OpenAPI must remain aligned with the implementation.
-
-Potential later phase:
-
-```text
-Backend/API complete
-→ Frontend implementation
-→ UI functional testing
-→ API/UI integration testing
-→ End-to-End testing
-→ Cross-browser / responsive testing
-→ Regression
-```
+The Authentication API should therefore remain frontend-ready with stable business/error codes, clear success/failure responses, and flows that map cleanly to future UI screens.
 
 ---
 
-## Next Contract Review
+## Current Contract Review Position
 
-Start with:
-
-```text
-POST /api/v1/auth/login
-```
-
-For each endpoint freeze only what is needed for implementation:
+Completed/frozen in the current endpoint-by-endpoint review:
 
 ```text
-Request
-→ Success Response
-→ Error Codes
-→ HTTP Status
+Customer Registration ✅
+Customer Email Verification ✅
+Expired-link resend UX direction ✅
 ```
 
-After the Authentication API/OpenAPI contract is frozen, proceed to backend implementation.
+Next:
+
+```text
+Freeze resend-verification success/error response
+→ First Admin / Admin invitation contract details
+→ Login
+→ Admin OTP
+→ Temporary password change
+→ Refresh
+→ Logout
+→ Password Recovery / Reset
+```
+
+After the Authentication API/OpenAPI contract is frozen, stop for discussion before backend implementation begins.
