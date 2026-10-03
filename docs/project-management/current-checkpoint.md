@@ -1,24 +1,24 @@
 # QA Commerce Lab — Current Checkpoint
 
-## How to Resume in a New Chat
+## How to Resume
 
-Use this file together with `docs/project-management/project-continuity.md` as the source of truth for project continuity.
+Use this file with `docs/project-management/project-continuity.md`.
 
 Suggested message:
 
-> Continue my QA Commerce Lab project from GitHub repository `mohamadalazzeh/qa-commerce-lab`. Read `docs/project-management/project-continuity.md` and `docs/project-management/current-checkpoint.md` first. Authentication business behavior is substantially frozen. Continue the final Authentication API-contract consistency pass, especially Admin Invitation request/response/error schemas, verification-resend response normalization, DB relationships/transactions, and OpenAPI alignment. Detailed Test Cases stay deferred until backend/Postman execution. Do not start backend implementation until I explicitly discuss the backend plan first.
+> Continue QA Commerce Lab from `mohamadalazzeh/qa-commerce-lab`. Authentication pre-backend steps 1–3 are complete: Admin Invitation API details are frozen, Verification Resend details are frozen, and the Authentication DB model/transaction review is complete. Continue with Step 4 only: final API-contract consistency/OpenAPI review with me. Do not start backend implementation until we explicitly discuss the backend plan first.
 
 ---
 
-## Current Module Status
+## Current Module
 
-Current module: **Authentication**.
+```text
+Authentication
+```
 
-Authentication requirements/business behavior are substantially complete. Current work is the final **Authentication API Contract / design consistency pass** before backend implementation.
+Detailed Test Cases remain intentionally deferred until the backend is running and real Postman/PostgreSQL/Mailpit execution begins.
 
-Detailed Test Cases remain intentionally deferred until the backend exists and Postman/PostgreSQL/Mailpit execution begins.
-
-Current delivery strategy:
+Delivery sequence remains:
 
 ```text
 Requirements
@@ -26,273 +26,204 @@ Requirements
 → API Contract
 → Test Scenarios / UAT
 → Backend Implementation
-→ Detailed Test Cases during real execution
-→ Postman API Testing
+→ Detailed Test Cases during execution
+→ Postman
 → SQL / DB Validation
-→ Bugs
+→ Defects
 → Retest
 → Regression
 ```
 
-**Important:** Before backend implementation begins, stop and discuss the backend plan with the user first.
-
 ---
 
-## Authentication — Frozen / Approved Behavior
+## Pre-Backend Finalization Status
 
 ```text
-Customer Registration ✅
-Customer Email Verification ✅
-Verification link lifetime = 24 hours ✅
-Verification resend cooldown = 60 seconds ✅
-Verification resend backend enforcement = 429 cooldown ✅
-Login account-state behavior ✅
-Account Lockout = 5 failed passwords / 15 minutes ✅
-Login Rate Limiting baseline ✅
-Admin Login OTP ✅
-First Admin restricted password-change flow ✅
-Access / Refresh / Rotation / Logout ✅
-Password Recovery / Reset OTP ✅
-Admin invitation business direction ✅
-Existing ACTIVE Customer → Admin promotion direction ✅
+1. Admin Invitation API details                     ✅ DONE
+2. Verification Resend response/security details    ✅ DONE
+3. Authentication DB relationships/transactions     ✅ DONE
+4. Final API Contract consistency/OpenAPI review     ⏳ NEXT — user + assistant together
+```
+
+After Step 4:
+
+```text
+Authentication Contract = FROZEN
+→ STOP
+→ discuss backend architecture/implementation plan with user
+→ only then start backend implementation
 ```
 
 ---
 
-## Login / Account State Summary
+## Step 1 — Admin Invitation API Frozen
+
+Endpoints:
 
 ```text
-Invalid email/password                     → 401 / INVALID_CREDENTIALS
-Correct credentials + PENDING_VERIFICATION → 403 / EMAIL_VERIFICATION_REQUIRED
-Correct credentials + DISABLED             → 403 / ACCOUNT_DISABLED
-Temporary password lock active             → 423 / ACCOUNT_LOCKED
-Rate limit exceeded                         → 429 / RATE_LIMIT_EXCEEDED
+POST /api/v1/admin/admin-invitations
+POST /api/v1/admin/admin-invitations/{invitationId}/resend
+POST /api/v1/admin/admin-invitations/{invitationId}/cancel
+POST /api/v1/auth/admin-invitations/inspect
+POST /api/v1/auth/admin-invitations/accept
 ```
 
-Wrong credentials must not reveal account existence or account state.
+Core rules:
 
-Pending Customers can be directed back into the verification-resend flow using the email already entered in Login.
+```text
+Invitation lifetime          = 24 hours
+Resend cooldown              = 60 seconds
+One PENDING invite/email     = maximum one
+Resend                       = same invitation row + new token
+Old token after resend       = invalid immediately
+Cancel                       = PENDING → CANCELLED; history retained
+```
+
+New invitee:
+
+```text
+Accept invitation
+→ choose password
+→ create users row ADMIN / ACTIVE
+→ no auto-login
+→ next Login requires Admin OTP
+```
+
+Existing ACTIVE Customer:
+
+```text
+Accept invitation
+→ same users row
+→ CUSTOMER → ADMIN
+→ same user_id/password/history
+→ revoke old Customer sessions
+→ next Login requires Admin OTP
+```
+
+`PENDING_VERIFICATION` or `DISABLED` Customers are not eligible for promotion.
+
+An invitation-inspection endpoint returns only whether password setup is required; it does not expose account details.
 
 ---
 
-## Account Lockout / Rate Limiting
+## Step 2 — Verification Resend Frozen
+
+Same endpoint supports exactly one of:
 
 ```text
-5 consecutive failed passwords
-→ temporary lock for 15 minutes
-→ correct password is still rejected while lock is active
-→ successful password authentication before failure #5 resets the sequence
+email context
+OR
+expired verification-token context
 ```
 
-Version 1 rate-limit baseline:
+```http
+POST /api/v1/auth/resend-verification
+```
+
+Timing:
 
 ```text
-Per account/email → 10 Login requests / minute
-Per source IP     → 60 Login requests / minute
-Exceeded          → 429 Too Many Requests
+Verification link lifetime = 24 hours
+Resend cooldown            = 60 seconds
 ```
 
-Thresholds remain configurable rather than hard-coded.
+Email-driven public path:
+
+```text
+200 generic response for eligible/ineligible account state
+unknown/ACTIVE/DISABLED email does not reveal existence/state
+```
+
+Cooldown is enforced uniformly for every syntactically valid normalized email input, including unknown emails, so `429` itself does not become an enumeration signal.
+
+```text
+Within cooldown → 429 / VERIFICATION_RESEND_COOLDOWN
+```
+
+Token-driven path may return specific state errors because possession of the opaque token supplies account context.
+
+Successful resend always invalidates the previous token and creates a fresh 24-hour link.
 
 ---
 
-## Admin Login OTP — Frozen
+## Step 3 — Authentication DB Review Complete
 
-Persistent PostgreSQL table direction:
-
-```text
-admin_login_otp_challenges
-```
-
-Core fields:
+Detailed design:
 
 ```text
-id / challengeId
-user_id
-otp_hash
-expires_at
-attempt_count
-last_sent_at
-used_at
-revoked_at
-revocation_reason
-created_at
+docs/business-analysis/authentication-data-model-v1.0.md
 ```
-
-Rules:
-
-```text
-OTP                       → 6 digits
-Lifetime                  → 5 minutes
-Wrong attempts            → max 5 per challenge
-Resend cooldown           → 60 seconds
-Resend challengeId        → same challengeId
-Resend resets attempts    → no
-Newest OTP only           → yes
-One-time use              → yes
-```
-
-Behavior:
-
-```text
-Wrong OTP                → 401 / INVALID_OTP; attempt_count + 1
-Expired OTP              → 401 / OTP_EXPIRED
-Attempts exhausted       → 423 / OTP_CHALLENGE_LOCKED
-Already used             → 409 / OTP_CHALLENGE_ALREADY_USED
-Resend before 60 sec     → 429 / OTP_RESEND_COOLDOWN + Retry-After
-```
-
-At five wrong OTP attempts, only the current challenge is invalidated. The Admin account is not disabled or password-locked. Full Login must be restarted.
-
-Resend generates a new OTP, invalidates the old OTP immediately, starts a fresh 5-minute OTP lifetime, and preserves `attempt_count`.
-
-A new full Admin Login invalidates a previous still-active Admin Login challenge for the same Admin.
-
-Raw OTP values must not be stored or logged.
-
----
-
-## First Bootstrap Admin — Frozen Direction
-
-```text
-Email + Temporary Password
-→ Admin OTP
-→ OTP verified
-→ no normal Admin session yet
-→ restricted passwordChangeToken
-→ change temporary password
-→ must_change_password = false
-→ Access + Refresh issued
-```
-
-`passwordChangeToken`:
-
-```text
-valid for 10 minutes
-one-time use
-purpose = CHANGE_TEMPORARY_PASSWORD
-cannot authorize normal Admin APIs
-```
-
-The successful change replaces the same `users.password_hash`; no second password is stored.
-
----
-
-## Session / Refresh / Logout — Frozen Direction
-
-```text
-Access Token lifetime  → 15 minutes
-Refresh Token lifetime → 7 days
-```
-
-Refresh Token is held in an `HttpOnly`, `Secure` cookie. Final SameSite/CSRF configuration is aligned with the eventual frontend/deployment origin model.
-
-Persistent PostgreSQL table direction:
-
-```text
-auth_sessions
-refresh_tokens
-```
-
-Refresh uses rotation:
-
-```text
-valid Refresh
-→ old Refresh invalid/used
-→ new Access
-→ new Refresh
-```
-
-Detected reuse of an already-rotated Refresh Token revokes the entire associated session.
-
-Logout affects the current session only and returns `204 No Content` after revoking session/Refresh state and clearing the cookie.
-
-A `DISABLED` user cannot refresh. `CUSTOMER → ADMIN` promotion revokes the Customer's old sessions before the next Admin Login + OTP.
-
----
-
-## Password Recovery / Reset — Frozen Direction
-
-Public Forgot Password response is generic regardless of whether an eligible account exists.
 
 Persistent PostgreSQL tables:
 
 ```text
+users
+email_verification_tokens
+admin_invitations
+admin_login_otp_challenges
+temporary_password_change_tokens
+auth_sessions
+refresh_tokens
 password_reset_challenges
 password_reset_tokens
+audit_logs
 ```
 
-Recovery OTP:
+Redis/runtime state:
 
 ```text
-6 digits
-5-minute lifetime
-5 wrong attempts maximum
-60-second resend cooldown
-newest OTP only
-one-time use
-resend does not reset attempt_count
+Login account/email rate-limit counters
+Login source-IP counters
+Public verification-resend cooldown keys
+Public password-reset abuse/cooldown keys
+Fast session/revocation lookup
 ```
 
-Password-reset resend also keeps a generic public response for eligible, unknown, disabled, and per-account-cooldown cases to avoid account enumeration. General source-IP abuse controls may still return `429` independently.
-
-Valid Reset OTP issues a one-time `resetToken` valid for 10 minutes.
-
-Successful password reset:
+Critical transactional operations:
 
 ```text
-replace users.password_hash
-reject reuse of current password
-invalidate resetToken
-revoke ALL sessions and Refresh Tokens
-no auto-login
-return user to Login
+Email verification consume
+Verification resend token replacement
+Admin invitation accept/promotion
+OTP one-time verification
+Refresh rotation/reuse handling
+Password reset + all-session revocation
 ```
 
-A `PENDING_VERIFICATION` Customer may reset the password but remains `PENDING_VERIFICATION`. A `DISABLED` account does not receive a Reset challenge/email.
-
-Admin still completes normal Admin Login OTP after password reset.
+Database UNIQUE/foreign-key/CHECK constraints are safety nets; application transactions/locking remain the primary concurrency control.
 
 ---
 
-## Admin Invitation — Approved Business Direction
-
-Persistent PostgreSQL table direction:
+## Previously Frozen Authentication Behavior
 
 ```text
-admin_invitations
+Customer Registration / Email Verification ✅
+Login account-state behavior ✅
+Account Lockout: 5 wrong passwords / 15 min ✅
+Login Rate Limiting baseline ✅
+Admin OTP: 6 digits / 5 min / 5 tries / 60 sec resend ✅
+First Admin restricted password-change flow ✅
+Access 15 min / Refresh 7 days / rotation ✅
+Logout current session ✅
+Forgot Password / Reset OTP / Reset Token ✅
+Password reset revokes all sessions ✅
 ```
-
-Approved behavior includes:
-
-```text
-Invitation lifetime = 24 hours
-One active/PENDING invitation per email
-Create → new persistent invitation resource
-Resend → update same invitation row; new token; old token invalid
-Resend cooldown = 60 seconds
-Cancel → PENDING → CANCELLED; record retained
-New invitee → creates ADMIN account on acceptance
-Existing ACTIVE Customer → same user_id promoted CUSTOMER → ADMIN
-Promotion → old Customer sessions revoked
-PENDING_VERIFICATION / DISABLED Customer → not eligible for promotion
-```
-
-Exact Admin Invitation request/response/error schemas are still part of the final contract pass.
 
 ---
 
-## Immediate Next Work
+## Immediate Next Step
 
-Before backend implementation:
+Do **Step 4 together with the user**:
 
 ```text
-1. Finalize exact Admin Invitation request/response/error schemas.
-2. Normalize remaining verification-resend public response/error details.
-3. Review Authentication DB table relationships + transaction/concurrency boundaries.
-4. Align endpoint inventory and errors with OpenAPI.
-5. Final Authentication contract freeze.
-6. STOP and discuss backend implementation plan with the user.
+Final API Contract consistency review
+→ endpoint inventory
+→ request bodies
+→ success responses
+→ HTTP statuses
+→ business error codes
+→ cross-flow contradictions
+→ OpenAPI alignment
 ```
 
-After that discussion, build the full Authentication backend and begin Postman + PostgreSQL + Mailpit execution, writing detailed Test Cases during real testing rather than pre-writing a large static suite.
+Do not begin backend implementation during or before this review.
