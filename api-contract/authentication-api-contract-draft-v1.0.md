@@ -2,13 +2,19 @@
 
 ## Status
 
-This is the current API-contract working draft for the Authentication module.
+Authentication business behavior is substantially frozen. Steps 1–3 of the pre-backend finalization are now complete:
 
-Authentication business behavior is substantially frozen. Exact request/response details that are still open are reviewed during the final contract consistency pass before backend implementation.
+```text
+1. Admin Invitation API details ✅
+2. Verification Resend details ✅
+3. Authentication DB relationship / transaction review ✅
+```
 
-Detailed QA Test Cases remain intentionally deferred until the backend is implemented and Postman execution begins.
+The remaining step is a final API-contract consistency/OpenAPI review with the user before freezing the module.
 
-**Important:** After the Authentication contract is frozen, stop and discuss the backend plan before implementation starts.
+Detailed QA Test Cases remain intentionally deferred until the backend is implemented and Postman/PostgreSQL/Mailpit execution begins.
+
+**Important:** Do not start backend implementation until the user and assistant explicitly discuss the backend plan after the final Authentication contract review.
 
 ---
 
@@ -35,6 +41,7 @@ POST /api/v1/auth/reset-password
 POST /api/v1/admin/admin-invitations
 POST /api/v1/admin/admin-invitations/{invitationId}/resend
 POST /api/v1/admin/admin-invitations/{invitationId}/cancel
+POST /api/v1/auth/admin-invitations/inspect
 POST /api/v1/auth/admin-invitations/accept
 ```
 
@@ -56,14 +63,14 @@ Content-Type: application/json
 }
 ```
 
-The caller does not submit `role` or `status`. The backend assigns:
+Backend assigns:
 
 ```text
 role = CUSTOMER
 status = PENDING_VERIFICATION
 ```
 
-Unexpected privileged fields such as `role` are rejected.
+The caller cannot assign `role` or `status`.
 
 Success:
 
@@ -83,9 +90,9 @@ No Access/Refresh Tokens are issued.
 Baseline errors:
 
 ```text
-Missing/invalid field           → 400 / VALIDATION_ERROR
-Unexpected privileged field     → 400 / VALIDATION_ERROR
-Duplicate email                 → 409 / EMAIL_ALREADY_REGISTERED
+Missing/invalid field       → 400 / VALIDATION_ERROR
+Unexpected privileged field → 400 / VALIDATION_ERROR
+Duplicate email             → 409 / EMAIL_ALREADY_REGISTERED
 ```
 
 ---
@@ -102,14 +109,13 @@ POST /api/v1/auth/verify-email
 }
 ```
 
-The token is a secure opaque raw token sent by email. Only its hash is stored in the database.
-
-A valid latest token within 24 hours:
+The raw verification token is sent by email; only its hash is persisted.
 
 ```text
-PENDING_VERIFICATION → ACTIVE
-token used_at → NOW
-200 OK
+Valid latest token within 24 hours
+→ PENDING_VERIFICATION → ACTIVE
+→ token used_at = NOW
+→ 200 OK
 ```
 
 ```json
@@ -118,36 +124,32 @@ token used_at → NOW
 }
 ```
 
-Verification does not log the Customer in and does not issue Access/Refresh Tokens. The frontend redirects to Login after success.
-
-Errors:
+Verification does not log the Customer in. The frontend proceeds to Login.
 
 ```text
-Missing token                 → 400 / VALIDATION_ERROR
-Expired token                 → 400 / VERIFICATION_TOKEN_EXPIRED
-Invalid/revoked/old token     → 400 / INVALID_VERIFICATION_TOKEN
+Missing token              → 400 / VALIDATION_ERROR
+Expired token              → 400 / VERIFICATION_TOKEN_EXPIRED
+Invalid/revoked/old token  → 400 / INVALID_VERIFICATION_TOKEN
 ```
 
 ---
 
-## 3. Resend Verification — Frozen Direction
+## 3. Verification Resend — Frozen
 
 ```http
 POST /api/v1/auth/resend-verification
 ```
-
-Verification link lifetime and resend cooldown are separate:
 
 ```text
 Verification link lifetime = 24 hours
 Resend cooldown            = 60 seconds
 ```
 
-Two user flows use the same endpoint:
+Exactly one of `email` or `token` is accepted.
 
-### A. Check-your-email / pending-login flow
+### A. Email-driven flow
 
-The frontend already knows the email from Registration or Login and keeps it only as temporary flow state.
+Used after Registration or after a correct Login attempt for a `PENDING_VERIFICATION` Customer. The frontend already has the email as temporary flow state.
 
 ```json
 {
@@ -155,7 +157,32 @@ The frontend already knows the email from Registration or Login and keeps it onl
 }
 ```
 
-### B. Expired verification-link flow
+The public response does not reveal whether the submitted email belongs to an account.
+
+Successful/generic response:
+
+```text
+200 OK
+```
+
+```json
+{
+  "message": "If an eligible unverified account exists, a verification email has been sent."
+}
+```
+
+The same public `200` response is used when the email is unknown, already verified, or belongs to a disabled account; no email is sent for those ineligible states.
+
+The 60-second cooldown is enforced uniformly for every syntactically valid normalized email input, including unknown emails. This prevents the cooldown response itself from becoming an account-enumeration signal.
+
+```text
+Within cooldown → 429 / VERIFICATION_RESEND_COOLDOWN
+Retry-After header where practical
+```
+
+For a real pending account, Registration / Login-verification flow starts the same cooldown window when the verification email is issued.
+
+### B. Expired-token flow
 
 ```json
 {
@@ -163,35 +190,39 @@ The frontend already knows the email from Registration or Login and keeps it onl
 }
 ```
 
-Exactly one of `email` or `token` is accepted. Both or neither are validation errors.
-
-Rules:
+The token may be expired for activation while still identifying the original pending account.
 
 ```text
-0–59 seconds after issue                → resend blocked
-60+ seconds                             → resend allowed if still PENDING_VERIFICATION
-Successful resend                       → new secure token
-New link lifetime                       → fresh 24 hours
-Previous token                          → invalid immediately
-Only newest verification link           → usable
-Frontend button state                   → UX only; backend also enforces cooldown
+Eligible pending account     → 200; new email/link sent
+Within 60-second cooldown    → 429 / VERIFICATION_RESEND_COOLDOWN
+Invalid/random/old token     → 400 / INVALID_VERIFICATION_TOKEN
+Already verified             → 409 / EMAIL_ALREADY_VERIFIED
+Disabled identified account  → 403 / ACCOUNT_DISABLED
 ```
 
-Cooldown rejection:
+Success response:
+
+```json
+{
+  "message": "A new verification email has been sent."
+}
+```
+
+Common resend rules:
 
 ```text
-429 Too Many Requests
-code = VERIFICATION_RESEND_COOLDOWN
-Retry-After header where practical
+Successful resend            → generate a new secure token
+New link lifetime            → fresh 24 hours
+Previous token               → revoked immediately
+Only newest link             → may activate the account
+Frontend cooldown            → UX only; backend is authoritative
+Both email + token           → 400 / VALIDATION_ERROR
+Neither email nor token      → 400 / VALIDATION_ERROR
 ```
-
-For token-driven requests, invalid/old token returns `400 / INVALID_VERIFICATION_TOKEN`; already verified returns `409 / EMAIL_ALREADY_VERIFIED`; a disabled identified account returns `403 / ACCOUNT_DISABLED`.
-
-For the public email-driven path, responses must not expose whether an unknown email exists. The final generic response wording will be normalized during the final consistency pass.
 
 ---
 
-## 4. Login — Frozen Behavior
+## 4. Login — Frozen
 
 ```http
 POST /api/v1/auth/login
@@ -204,8 +235,6 @@ POST /api/v1/auth/login
 }
 ```
 
-Baseline outcomes:
-
 ```text
 Invalid email/password                     → 401 / INVALID_CREDENTIALS
 Correct credentials + PENDING_VERIFICATION → 403 / EMAIL_VERIFICATION_REQUIRED
@@ -214,29 +243,27 @@ Temporary account lock active              → 423 / ACCOUNT_LOCKED
 Rate limit exceeded                         → 429 / RATE_LIMIT_EXCEEDED
 ```
 
-Wrong credentials do not disclose account existence or account state.
+Wrong credentials never reveal account existence or account state.
 
-A pending Customer may be directed to the verification screen and resend a verification email using the email already entered during Login.
-
-### Customer
+Customer:
 
 ```text
 ACTIVE + valid credentials
 → Access Token + Refresh Token
-→ no OTP in Version 1
+→ no OTP in V1
 ```
 
-### Admin
+Admin:
 
 ```text
 ACTIVE + valid credentials
-→ no normal Access/Refresh Tokens yet
+→ no normal Access/Refresh yet
 → create Admin Login OTP challenge
-→ email OTP
-→ return requiresTwoFactor + challengeId
+→ send OTP
+→ return challengeId
 ```
 
-Conceptual response:
+Conceptual Admin response:
 
 ```json
 {
@@ -249,29 +276,26 @@ Conceptual response:
 
 ## 5. Login Protection — Frozen
 
-### Account Lockout
-
-Applies to Customer and Admin password authentication.
+Account Lockout applies to Customer and Admin password authentication:
 
 ```text
 5 consecutive failed passwords
-→ temporary account lock for 15 minutes
+→ temporary lock for 15 minutes
+→ correct password is still rejected while lock is active
 ```
 
-A successful password authentication before the fifth failure resets the consecutive-failure sequence.
+A successful password authentication before the fifth failure resets the consecutive-failure counter.
 
-Suggested persistent account-security fields:
+Persistent account-security state:
 
 ```text
 users.failed_login_attempts
 users.locked_until
 ```
 
-`DISABLED` is a business/account state and is separate from the temporary security lock.
+`DISABLED` is a business state and is separate from the temporary security lock.
 
-### Rate Limiting
-
-Version 1 baseline:
+Rate-limit baseline:
 
 ```text
 Per account/email → 10 Login requests / minute
@@ -279,22 +303,22 @@ Per source IP     → 60 Login requests / minute
 Exceeded          → 429 Too Many Requests
 ```
 
-Thresholds are configurable, not hard-coded. Rate limiting rejects matching requests temporarily; it does not stop the server.
+Rate-limit counters are implementation/runtime state and are expected in Redis rather than PostgreSQL. Thresholds are configurable.
 
 ---
 
 ## 6. Admin Login OTP — Frozen
 
-Persistent PostgreSQL table direction:
+Persistent PostgreSQL table:
 
 ```text
 admin_login_otp_challenges
 ```
 
-Conceptual fields:
+Core fields:
 
 ```text
-id                  = challengeId
+id = challengeId
 user_id
 otp_hash
 expires_at
@@ -306,24 +330,22 @@ revocation_reason
 created_at
 ```
 
-The table is persistent; each row represents a temporary Admin Login challenge. Raw OTP values are never stored or logged.
-
 Rules:
 
 ```text
-Format                    → 6 digits
-Validity                  → 5 minutes
-Maximum wrong attempts    → 5 per challenge
-Resend cooldown           → 60 seconds
-One-time use              → yes
-Newest OTP only           → yes
-Resend challengeId        → same challengeId
-Resend resets attempts    → no
+OTP format                 → 6 digits
+Validity                   → 5 minutes
+Maximum wrong attempts     → 5 per challenge
+Resend cooldown            → 60 seconds
+One-time use               → yes
+Newest OTP only            → yes
+Resend challengeId         → same challengeId
+Resend resets attempts     → no
 ```
 
-A new full Admin Login invalidates any previous still-active Admin Login challenge for that Admin.
+A new full Admin Login revokes a previous still-active Admin Login challenge for that Admin.
 
-### Verify
+Verify:
 
 ```http
 POST /api/v1/auth/admin-otp/verify
@@ -336,23 +358,18 @@ POST /api/v1/auth/admin-otp/verify
 }
 ```
 
-Behavior:
-
 ```text
-Missing/invalid request fields  → 400 / VALIDATION_ERROR
-Wrong OTP                       → 401 / INVALID_OTP; attempt_count + 1
-Expired OTP                     → 401 / OTP_EXPIRED
-Fifth wrong OTP                 → challenge revoked/locked
-Attempts exhausted              → 423 / OTP_CHALLENGE_LOCKED
-Already-used challenge          → 409 / OTP_CHALLENGE_ALREADY_USED
-Valid OTP                       → used_at = NOW; continue authentication
+Invalid request fields       → 400 / VALIDATION_ERROR
+Wrong OTP                    → 401 / INVALID_OTP; attempt_count + 1
+Expired OTP                  → 401 / OTP_EXPIRED
+Attempts exhausted           → 423 / OTP_CHALLENGE_LOCKED
+Already-used challenge       → 409 / OTP_CHALLENGE_ALREADY_USED
+Valid OTP                    → used_at = NOW; authentication continues
 ```
 
-Five wrong OTP attempts invalidate only the current challenge. They do not disable or password-lock the Admin account. The Admin must restart Login to obtain a new challenge.
+Five wrong OTP attempts invalidate only the challenge. The Admin account is not disabled or password-locked.
 
-Concurrent verification of the same challenge must be atomic: only one request may succeed.
-
-### Resend
+Resend:
 
 ```http
 POST /api/v1/auth/admin-otp/resend
@@ -364,34 +381,22 @@ POST /api/v1/auth/admin-otp/resend
 }
 ```
 
-Before 60 seconds:
-
 ```text
-429 / OTP_RESEND_COOLDOWN
-Retry-After: <remaining-seconds>
+Before 60 seconds → 429 / OTP_RESEND_COOLDOWN + Retry-After
+After 60 seconds  → same challengeId, new OTP, fresh 5-minute expiry
+Old OTP           → invalid immediately
+attempt_count     → unchanged
 ```
 
-After 60 seconds:
+A used/revoked/max-attempt challenge cannot be revived.
 
-```text
-same challengeId
-→ generate new OTP
-→ replace otp_hash
-→ expires_at = NOW + 5 minutes
-→ last_sent_at = NOW
-→ previous OTP invalid immediately
-→ attempt_count remains unchanged
-```
-
-A `USED` or max-attempt/revoked challenge cannot be revived by Resend.
+Concurrent verification must be atomic so the same one-time challenge cannot succeed twice.
 
 ---
 
-## 7. First Bootstrap Admin — Temporary Password Change
+## 7. First Bootstrap Admin — Frozen
 
-The first Admin is created through secure operator bootstrap, not public registration.
-
-Conceptual user state:
+The initial Admin is created through secure operator bootstrap, not public registration.
 
 ```text
 role = ADMIN
@@ -399,20 +404,20 @@ status = ACTIVE
 must_change_password = true
 ```
 
-Flow:
+First login:
 
 ```text
 Email + Temporary Password
 → Admin OTP
 → OTP verified
-→ do NOT issue normal Admin session yet
+→ no normal Admin session yet
 → issue restricted passwordChangeToken
-→ mandatory password change
+→ mandatory password replacement
 → must_change_password = false
-→ issue normal Access + Refresh
+→ issue Access + Refresh
 ```
 
-The restricted `passwordChangeToken`:
+`passwordChangeToken`:
 
 ```text
 validity = 10 minutes
@@ -432,129 +437,321 @@ POST /api/v1/auth/change-temporary-password
 }
 ```
 
-The token identifies the Admin internally. `confirmPassword` is a frontend concern and is not required by the API.
-
-The new password must satisfy the normal password policy and must not equal the current temporary password. Success replaces `users.password_hash`; no second password row is kept.
+The new password must satisfy the normal password policy and must differ from the current temporary password. Success replaces the same `users.password_hash`.
 
 ---
 
-## 8. Additional Admin Invitation — Approved Business Direction
+## 8. Admin Invitation — Frozen
 
-Only an authenticated `ADMIN` may create/manage Admin invitations. There is no public Admin registration endpoint.
+Only an authenticated `ADMIN` may create, resend, or cancel Admin invitations. There is no public Admin registration endpoint.
 
-Persistent PostgreSQL table direction:
+Persistent table:
 
 ```text
 admin_invitations
 ```
 
-It stores invitation records independently from `users`, including records for new people and promotion invitations linked to an existing Customer.
+### 8.1 Create Invitation
 
-Conceptual fields include:
-
-```text
-id
-user_id nullable
-first_name
-last_name
-email
-token_hash
-status
-expires_at
-used_at
-created_at
-updated_at
+```http
+POST /api/v1/admin/admin-invitations
+Authorization: Bearer <admin-access-token>
 ```
 
-Approved rules:
-
-```text
-Invitation lifetime                   → 24 hours
-One active/PENDING invitation/email  → maximum one
-Create invitation                     → 201 Created
-Resend existing invitation            → update same row; 200 OK
-Resend cooldown                       → 60 seconds
-Resend                                → new token; old token invalid immediately
-Cancel                                → PENDING → CANCELLED; row kept for history
-Already ADMIN                         → no invitation; conflict
+```json
+{
+  "firstName": "Ahmad",
+  "lastName": "Saleh",
+  "email": "ahmad@example.com"
+}
 ```
 
-For a new email, acceptance creates a `users` row with `role = ADMIN`, `status = ACTIVE`, using the invitee's chosen password. Acceptance does not auto-login.
+For a new email, the invitation stores the supplied names until acceptance creates the user. For an existing Customer, the existing `users` record remains authoritative; invitation data must never overwrite the Customer profile.
 
-For an existing `ACTIVE` Customer, invitation acceptance promotes the same `users` row:
+Success:
 
 ```text
-CUSTOMER → ADMIN
-same user_id
-same password_hash
-same historical orders/data
-all existing Customer sessions revoked
-next Login follows Admin password + OTP flow
+201 Created
 ```
 
-`PENDING_VERIFICATION` and `DISABLED` Customers are not eligible for promotion until their account state is resolved.
+```json
+{
+  "invitationId": "<uuid>",
+  "message": "Admin invitation created successfully.",
+  "expiresIn": 86400
+}
+```
 
-Exact invitation request/response/error schemas remain part of the final contract consistency pass.
+Rules/errors:
+
+```text
+Invalid request data                    → 400 / VALIDATION_ERROR
+Unauthenticated                         → 401
+Authenticated but not ADMIN             → 403
+Email already belongs to ADMIN          → 409 / ADMIN_ALREADY_EXISTS
+PENDING invitation already exists       → 409 / ADMIN_INVITATION_ALREADY_PENDING
+EXPIRED invitation exists               → 409 / ADMIN_INVITATION_REQUIRES_RESEND
+Existing PENDING_VERIFICATION Customer   → 409 / ADMIN_PROMOTION_NOT_ALLOWED
+Existing DISABLED Customer               → 409 / ADMIN_PROMOTION_NOT_ALLOWED
+```
+
+A `CANCELLED` historical invitation does not prevent a later fresh invitation. A used invitation normally corresponds to an account that is already Admin and is therefore blocked by `ADMIN_ALREADY_EXISTS`.
+
+For an existing `ACTIVE` Customer, create a promotion invitation linked to the same `user_id`; do not change the role yet.
+
+### 8.2 Inspect Invitation
+
+Used by the future frontend to decide whether the invitee must set a password.
+
+```http
+POST /api/v1/auth/admin-invitations/inspect
+```
+
+```json
+{
+  "token": "<invitation-token>"
+}
+```
+
+Valid new-person invitation:
+
+```json
+{
+  "valid": true,
+  "requiresPasswordSetup": true
+}
+```
+
+Valid existing-Customer promotion:
+
+```json
+{
+  "valid": true,
+  "requiresPasswordSetup": false
+}
+```
+
+No email or private account details are returned. The token is high-entropy and is supplied in the request body rather than a backend URL path.
+
+```text
+Invalid/revoked/random token → 400 / INVALID_ADMIN_INVITATION_TOKEN
+Expired invitation           → 400 / ADMIN_INVITATION_EXPIRED
+Used invitation              → 409 / ADMIN_INVITATION_ALREADY_USED
+Cancelled invitation         → 409 / ADMIN_INVITATION_CANCELLED
+```
+
+### 8.3 Resend Invitation
+
+```http
+POST /api/v1/admin/admin-invitations/{invitationId}/resend
+Authorization: Bearer <admin-access-token>
+```
+
+Allowed for `PENDING` after cooldown and for `EXPIRED` invitations.
+
+Success:
+
+```text
+200 OK
+```
+
+```json
+{
+  "invitationId": "<uuid>",
+  "message": "Admin invitation resent successfully.",
+  "expiresIn": 86400
+}
+```
+
+Behavior:
+
+```text
+Same invitation row                    → reused
+New token                              → generated
+Previous token                         → invalid immediately
+expires_at                             → NOW + 24 hours
+status                                 → PENDING
+Resend cooldown                        → 60 seconds
+Within cooldown                        → 429 / ADMIN_INVITATION_RESEND_COOLDOWN
+Invitation not found                   → 404 / ADMIN_INVITATION_NOT_FOUND
+USED                                   → 409 / ADMIN_INVITATION_ALREADY_USED
+CANCELLED                              → 409 / ADMIN_INVITATION_CANCELLED
+Target already ADMIN                   → 409 / ADMIN_ALREADY_EXISTS
+Target Customer no longer ACTIVE       → 409 / ADMIN_PROMOTION_NOT_ALLOWED
+```
+
+If a formerly-new invitee email now belongs to an `ACTIVE` Customer, the resend/accept flow may link the invitation to that Customer and continue as a promotion without creating a duplicate user.
+
+### 8.4 Cancel Invitation
+
+```http
+POST /api/v1/admin/admin-invitations/{invitationId}/cancel
+Authorization: Bearer <admin-access-token>
+```
+
+Success:
+
+```text
+200 OK
+```
+
+```json
+{
+  "message": "Admin invitation cancelled successfully."
+}
+```
+
+```text
+PENDING → CANCELLED
+current token → unusable
+record → retained for audit/history
+not found → 404 / ADMIN_INVITATION_NOT_FOUND
+already cancelled → 409 / ADMIN_INVITATION_CANCELLED
+already used → 409 / ADMIN_INVITATION_ALREADY_USED
+```
+
+Expired invitations are already unusable and do not require cancellation.
+
+### 8.5 Accept Invitation
+
+```http
+POST /api/v1/auth/admin-invitations/accept
+```
+
+New-person invitation:
+
+```json
+{
+  "token": "<invitation-token>",
+  "newPassword": "Strong@123"
+}
+```
+
+Existing-Customer promotion:
+
+```json
+{
+  "token": "<invitation-token>"
+}
+```
+
+For a new person, `newPassword` is required and must satisfy the standard password policy. For an existing Customer promotion, the existing password is preserved and a new password is not requested.
+
+New-person success:
+
+```text
+201 Created
+```
+
+```json
+{
+  "message": "Admin account created successfully."
+}
+```
+
+Existing-Customer promotion success:
+
+```text
+200 OK
+```
+
+```json
+{
+  "message": "Admin access activated successfully."
+}
+```
+
+Acceptance never auto-logs the user in.
+
+New person:
+
+```text
+validate invitation
+→ create users row with role=ADMIN, status=ACTIVE
+→ mark invitation USED
+→ next step is normal Admin Login + OTP
+```
+
+Existing `ACTIVE` Customer:
+
+```text
+validate invitation
+→ same users row
+→ CUSTOMER → ADMIN
+→ same user_id / password_hash / historical orders and data
+→ revoke all current Customer sessions
+→ mark invitation USED
+→ next Login requires Admin password + OTP
+```
+
+At acceptance time, the backend re-resolves the invitation email to prevent duplicates. If a new-person invite email has since become an `ACTIVE` Customer, acceptance switches safely to promotion semantics; `PENDING_VERIFICATION` or `DISABLED` state is rejected with `409 / ADMIN_PROMOTION_NOT_ALLOWED`.
+
+Other acceptance errors:
+
+```text
+Invalid/revoked/random token → 400 / INVALID_ADMIN_INVITATION_TOKEN
+Expired invitation           → 400 / ADMIN_INVITATION_EXPIRED
+Used invitation              → 409 / ADMIN_INVITATION_ALREADY_USED
+Cancelled invitation         → 409 / ADMIN_INVITATION_CANCELLED
+Weak/missing password when required → 400 / VALIDATION_ERROR
+```
+
+Invitation acceptance is transactional and concurrency-safe: two simultaneous accepts cannot both create/promote a user.
 
 ---
 
-## 9. Session / Refresh — Frozen Direction
+## 9. Session / Refresh / Logout — Frozen
 
 ```text
 Access Token lifetime  → 15 minutes
 Refresh Token lifetime → 7 days
 ```
 
-Access Token is sent as a Bearer token. Refresh Token is held in an `HttpOnly`, `Secure` cookie. Final SameSite/CSRF settings are confirmed with the deployment/frontend origin model.
+Access Token is a Bearer token. Refresh Token is held in an `HttpOnly`, `Secure` cookie. SameSite/CSRF configuration is finalized against the frontend/deployment origin model during the final consistency pass.
 
-Persistent PostgreSQL table direction:
+Persistent PostgreSQL tables:
 
 ```text
 auth_sessions
 refresh_tokens
 ```
 
-Raw Refresh Tokens are not stored; a token hash is stored.
+Raw Refresh Tokens are never stored; only a verifier/hash is persisted.
 
-### Refresh
+Refresh:
 
 ```http
 POST /api/v1/auth/refresh
 ```
 
-Valid refresh behavior:
-
 ```text
-validate cookie token + session + current user state
-→ old Refresh Token becomes used/invalid
-→ issue new Access Token
-→ issue rotated Refresh Token
+validate Refresh cookie + session + current user state
+→ old Refresh becomes used/invalid
+→ issue new Access
+→ issue rotated Refresh
 ```
 
-Reusing an already-rotated Refresh Token is rejected with a generic `401 / INVALID_REFRESH_TOKEN` direction and revokes the entire associated session.
+Reuse of an already-rotated Refresh Token returns generic `401 / INVALID_REFRESH_TOKEN` behavior and revokes the associated session.
 
-A `DISABLED` account cannot refresh. A Customer→Admin role change revokes the Customer's existing sessions before the user logs in again as Admin.
+A `DISABLED` account cannot refresh. Customer→Admin promotion revokes existing Customer sessions before the next Admin Login.
 
-### Logout
+Logout:
 
 ```http
 POST /api/v1/auth/logout
 ```
 
-Logout affects the current session only:
-
 ```text
-auth_sessions.revoked_at = NOW
-associated Refresh Tokens revoked
-refresh cookie cleared
-204 No Content
+current session only
+→ auth_sessions.revoked_at = NOW
+→ associated Refresh Tokens revoked
+→ Refresh cookie cleared
+→ 204 No Content
 ```
 
 ---
 
-## 10. Password Recovery / Reset — Frozen Direction
-
-Password Recovery applies to Customer and Admin and is separate from Customer Email Verification and Admin Login OTP.
+## 10. Password Recovery / Reset — Frozen
 
 ### Start Recovery
 
@@ -568,7 +765,7 @@ POST /api/v1/auth/forgot-password
 }
 ```
 
-Public response is generic:
+Public response:
 
 ```text
 200 OK
@@ -580,29 +777,22 @@ Public response is generic:
 }
 ```
 
-Unknown or `DISABLED` accounts receive the same public response but do not get a Reset challenge/email.
+Eligible:
 
-`ACTIVE` Customer/Admin and `PENDING_VERIFICATION` Customer accounts may use recovery. Resetting a pending account does not activate it.
+```text
+ACTIVE Customer ✅
+ACTIVE Admin ✅
+PENDING_VERIFICATION Customer ✅
+DISABLED account ❌ no challenge/email; same generic public response
+Unknown email ❌ no challenge/email; same generic public response
+```
 
-Persistent PostgreSQL table:
+A pending Customer remains `PENDING_VERIFICATION` after password reset.
+
+Persistent table:
 
 ```text
 password_reset_challenges
-```
-
-Conceptual fields:
-
-```text
-id
-user_id
-otp_hash
-expires_at
-attempt_count
-last_sent_at
-used_at
-revoked_at
-revocation_reason
-created_at
 ```
 
 OTP rules:
@@ -617,7 +807,7 @@ one-time use
 resend does not reset attempt_count
 ```
 
-At five wrong attempts, only the Reset challenge is invalidated; the account itself is not locked or disabled.
+At five wrong attempts, only the Reset challenge is invalidated.
 
 ### Resend Recovery OTP
 
@@ -631,9 +821,9 @@ POST /api/v1/auth/password-reset/resend
 }
 ```
 
-To prevent account enumeration, the public response remains generic for existing, unknown, disabled, and per-account-cooldown cases. Internally, a new OTP is sent only when the account is eligible and the 60-second cooldown has passed. General source-IP abuse protection may still return `429` independently.
+The public response remains generic for eligible, unknown, disabled, and per-account-cooldown states. Internally, a new OTP is sent only when the account is eligible and cooldown has passed. General source-IP abuse controls may still return `429` independently.
 
-Successful resend invalidates the previous OTP immediately, starts a fresh 5-minute OTP lifetime, and preserves `attempt_count`.
+Successful resend invalidates the previous OTP, starts a fresh 5-minute OTP lifetime, and preserves `attempt_count`.
 
 ### Verify Recovery OTP
 
@@ -648,7 +838,7 @@ POST /api/v1/auth/password-reset/verify-otp
 }
 ```
 
-Invalid/unknown combinations use generic invalid-OTP behavior rather than disclosing account existence.
+Invalid/unknown combinations use generic invalid-OTP behavior.
 
 Valid OTP:
 
@@ -657,7 +847,7 @@ challenge becomes used/verified
 → issue one-time resetToken
 ```
 
-Persistent PostgreSQL table:
+Persistent table:
 
 ```text
 password_reset_tokens
@@ -683,59 +873,103 @@ POST /api/v1/auth/reset-password
 }
 ```
 
-Success:
-
 ```text
 validate resetToken
 → validate password policy
 → reject same-as-current password
 → replace users.password_hash
 → mark resetToken used
-→ revoke all existing sessions and Refresh Tokens
+→ revoke ALL sessions and Refresh Tokens
 → no auto-login
-→ user returns to Login
+→ return to Login
 ```
 
-The project does not maintain full password history in Version 1; only reuse of the current password is rejected.
-
-Admin users still complete the normal Admin Login OTP step on the next sign-in.
+No full password history is maintained in V1; only reuse of the current password is rejected. Admins still complete Admin Login OTP on the next sign-in.
 
 ---
 
-## Security / Concurrency Rules
+## 11. Authentication Data Model / Transaction Review — Frozen Direction
+
+Detailed table/relationship decisions are documented in:
 
 ```text
-Passwords                     → hash only; never log plaintext
-Verification/invitation token → raw sent to user; hash stored
-OTP                           → raw emailed; non-plaintext verifier stored; never log raw OTP
-Refresh/Reset tokens          → raw held by client; hash stored
-Concurrent one-time use       → transaction/locking so only one request can succeed
-Database UNIQUE constraints   → safety net, not sole concurrency control
+docs/business-analysis/authentication-data-model-v1.0.md
+```
+
+Persistent PostgreSQL tables in Authentication scope:
+
+```text
+users
+email_verification_tokens
+admin_invitations
+admin_login_otp_challenges
+temporary_password_change_tokens
+auth_sessions
+refresh_tokens
+password_reset_challenges
+password_reset_tokens
+audit_logs
+```
+
+Runtime/ephemeral protection state such as IP/email request counters and generic unknown-email cooldown keys belongs in Redis, not PostgreSQL.
+
+Critical operations use transactions/locking rather than relying only on UNIQUE constraints:
+
+```text
+email verification consume
+verification resend token replacement
+Admin invitation acceptance / promotion
+OTP one-time verification
+Refresh Token rotation/reuse handling
+password reset + global session revocation
+```
+
+Database constraints remain a safety net for uniqueness and referential integrity.
+
+---
+
+## Security / Concurrency Baseline
+
+```text
+Passwords                     → strong password hash only; never log plaintext
+Verification/invitation token → raw sent to user; token hash persisted
+OTP                           → raw emailed; non-plaintext verifier persisted; never log raw OTP
+Refresh/Reset tokens          → raw held by client; hash persisted
+One-time operations           → transaction/row locking or atomic conditional update
+Email uniqueness              → normalized, case-insensitive UNIQUE constraint
 ```
 
 ---
 
 ## Current Contract Review Position
 
-Substantially frozen:
+Completed before final consistency review:
 
 ```text
 Customer Registration ✅
-Email Verification / Resend ✅
+Email Verification + Resend ✅
 Login states / Lockout / Rate Limit ✅
 Admin Login OTP ✅
 First Admin forced password change ✅
+Admin Invitation / Resend / Cancel / Accept / Promotion ✅
 Session / Refresh / Logout ✅
-Password Recovery / Reset OTP ✅
-Admin invitation business direction ✅
+Password Recovery / Reset ✅
+Authentication DB model / relationships / transactions ✅
 ```
 
-Remaining before backend implementation:
+Remaining:
 
 ```text
-1. Finalize exact Admin Invitation request/response/error schemas.
-2. Final consistency pass across verification resend + all error/status codes.
-3. Confirm database table relationships/transactions and OpenAPI alignment.
-4. Freeze Authentication contract.
-5. STOP and discuss backend implementation plan with the user.
+4. Final API Contract consistency review with the user:
+   - endpoint inventory
+   - request/response schemas
+   - HTTP status + business error codes
+   - cross-flow contradictions
+   - OpenAPI alignment
+
+Then:
+Authentication Contract = FROZEN
+→ STOP
+→ discuss backend implementation plan with the user
+→ only then begin backend implementation
 ```
