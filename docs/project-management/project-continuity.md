@@ -304,7 +304,7 @@ Use GUI tooling such as DBeaver plus `psql`/SQL CLI experience. Dockerized Postg
 
 ## Immediate Resume Point
 
-The backend skeleton and the first Authentication business vertical slice, `POST /api/v1/auth/register`, are code-complete and developer-validated. Real Postman execution and PostgreSQL/Mailpit evidence are the next phase.
+The backend skeleton and the first Authentication business vertical slice, `POST /api/v1/auth/register`, are code-complete and developer-validated. The local Postman Collection/Environment and Registration SQL validation query are prepared and JSON-validated. Real Postman execution and PostgreSQL/Mailpit evidence are the next phase.
 
 Environment/database preparation and Registration implementation are complete:
 
@@ -318,7 +318,8 @@ Environment/database preparation and Registration implementation are complete:
 7. Backend infrastructure skeleton + health/runtime validation         ✅
 8. Implement `POST /api/v1/auth/register` as the first vertical slice  ✅
 9. Developer validation: 30 tests + typecheck/lint/format/build         ✅
-10. Postman execution + PostgreSQL/Mailpit evidence                     ⏭ NEXT
+10. Postman Collection + Local Environment preparation                  ✅
+11. Postman execution + PostgreSQL/Mailpit evidence                     ⏭ NEXT
 ```
 
 Registration implementation covers the frozen Contract behavior: strict request validation, CUSTOMER/PENDING_VERIFICATION creation, case-insensitive duplicate protection including DB race handling, Argon2id password hashing, hashed verification-token persistence, 24-hour verification lifetime, atomic user/token persistence, exact `201`, `400`, `409`, and `503` HTTP behavior, and no Access/Refresh Token issuance.

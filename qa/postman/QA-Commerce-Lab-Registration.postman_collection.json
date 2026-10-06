@@ -1,0 +1,1487 @@
+{
+  "info": {
+    "_postman_id": "c902d4c0-0192-4dc1-95fc-9f47a6fe17d2",
+    "name": "QA Commerce Lab - Authentication - Registration",
+    "description": "Registration collection aligned with Authentication API Contract v1.0 and authentication test scenarios.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "00 - Environment Check",
+      "description": "Run first. No data creation.",
+      "item": [
+        {
+          "name": "ENV-01 Health Check",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "const json = pm.response.json();",
+                  "pm.test('Backend reports healthy', function () { pm.expect(json.status).to.eql('ok'); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "Run before Registration tests. Does not create data."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "01 - Registration Normal Suite",
+      "description": "Run in order. First request creates registration_email for duplicate tests. Other negative cases are independent.",
+      "item": [
+        {
+          "name": "TS-AUTH-REG-01 Valid Customer Registration",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "const suffix = `${Date.now()}-${Math.floor(Math.random()*100000)}`;",
+                  "pm.environment.set('registration_email', `qa.register.${suffix}@example.com`);"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 201', function () { pm.response.to.have.status(201); });",
+                  "const json = pm.response.json();",
+                  "pm.test('Success response matches contract', function () { pm.expect(json.message).to.eql('Registration successful. Please verify your email.'); pm.expect(json.verificationRequired).to.eql(true); });",
+                  "pm.test('No authentication tokens are issued', function () { pm.expect(json).to.not.have.property('accessToken'); pm.expect(json).to.not.have.property('refreshToken'); pm.expect(json).to.not.have.property('token'); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"{{valid_first_name}}\",\n  \"lastName\": \"{{valid_last_name}}\",\n  \"email\": \"{{registration_email}}\",\n  \"password\": \"{{valid_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Primary positive case. Saves a unique email for the two duplicate-email tests that follow."
+          },
+          "response": []
+        },
+        {
+          "name": "TS-AUTH-REG-07 Duplicate Email - Exact Case",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 409', function () { pm.response.to.have.status(409); });",
+                  "const json = pm.response.json();",
+                  "pm.test('Returns EMAIL_ALREADY_REGISTERED', function () { pm.expect(json.code).to.eql('EMAIL_ALREADY_REGISTERED'); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"{{valid_first_name}}\",\n  \"lastName\": \"{{valid_last_name}}\",\n  \"email\": \"{{registration_email}}\",\n  \"password\": \"{{valid_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Run after the valid registration request."
+          },
+          "response": []
+        },
+        {
+          "name": "TS-AUTH-REG-07 Duplicate Email - Case Insensitive",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "const email=pm.environment.get('registration_email');",
+                  "if(!email){throw new Error('Run the valid registration request first.');}",
+                  "pm.environment.set('registration_email_upper',email.toUpperCase());"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 409', function () { pm.response.to.have.status(409); });",
+                  "const json = pm.response.json();",
+                  "pm.test('Returns EMAIL_ALREADY_REGISTERED', function () { pm.expect(json.code).to.eql('EMAIL_ALREADY_REGISTERED'); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"{{valid_first_name}}\",\n  \"lastName\": \"{{valid_last_name}}\",\n  \"email\": \"{{registration_email_upper}}\",\n  \"password\": \"{{valid_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Verifies case-insensitive uniqueness."
+          },
+          "response": []
+        },
+        {
+          "name": "TS-AUTH-REG-05 Missing First Name",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 400', function () { pm.response.to.have.status(400); });",
+                  "const json = pm.response.json();",
+                  "pm.test('Returns VALIDATION_ERROR', function () { pm.expect(json.code).to.eql('VALIDATION_ERROR'); });",
+                  "pm.test('Validation error identifies firstName', function () { pm.expect(json.errors.some(e => e.field === 'firstName')).to.eql(true); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lastName\": \"Tester\",\n  \"email\": \"missing.firstname@example.com\",\n  \"password\": \"{{valid_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "TS-AUTH-REG-05 Missing Last Name",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 400', function () { pm.response.to.have.status(400); });",
+                  "const json = pm.response.json();",
+                  "pm.test('Returns VALIDATION_ERROR', function () { pm.expect(json.code).to.eql('VALIDATION_ERROR'); });",
+                  "pm.test('Validation error identifies lastName', function () { pm.expect(json.errors.some(e => e.field === 'lastName')).to.eql(true); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"QA\",\n  \"email\": \"missing.lastname@example.com\",\n  \"password\": \"{{valid_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "TS-AUTH-REG-05 Missing Email",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 400', function () { pm.response.to.have.status(400); });",
+                  "const json = pm.response.json();",
+                  "pm.test('Returns VALIDATION_ERROR', function () { pm.expect(json.code).to.eql('VALIDATION_ERROR'); });",
+                  "pm.test('Validation error identifies email', function () { pm.expect(json.errors.some(e => e.field === 'email')).to.eql(true); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"QA\",\n  \"lastName\": \"Tester\",\n  \"password\": \"{{valid_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "TS-AUTH-REG-05 Missing Password",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 400', function () { pm.response.to.have.status(400); });",
+                  "const json = pm.response.json();",
+                  "pm.test('Returns VALIDATION_ERROR', function () { pm.expect(json.code).to.eql('VALIDATION_ERROR'); });",
+                  "pm.test('Validation error identifies password', function () { pm.expect(json.errors.some(e => e.field === 'password')).to.eql(true); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"QA\",\n  \"lastName\": \"Tester\",\n  \"email\": \"missing.password@example.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "TS-AUTH-REG-06 Valid Arabic Names",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "const suffix = `${Date.now()}-${Math.floor(Math.random()*100000)}`;",
+                  "pm.environment.set('arabic_registration_email', `qa.register.ar.${suffix}@example.com`);"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 201', function () { pm.response.to.have.status(201); });",
+                  "const json = pm.response.json();",
+                  "pm.test('Success response matches contract', function () { pm.expect(json.message).to.eql('Registration successful. Please verify your email.'); pm.expect(json.verificationRequired).to.eql(true); });",
+                  "pm.test('No authentication tokens are issued', function () { pm.expect(json).to.not.have.property('accessToken'); pm.expect(json).to.not.have.property('refreshToken'); pm.expect(json).to.not.have.property('token'); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"محمد\",\n  \"lastName\": \"العزة\",\n  \"email\": \"{{arabic_registration_email}}\",\n  \"password\": \"{{valid_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Verifies supported Arabic names."
+          },
+          "response": []
+        },
+        {
+          "name": "TS-AUTH-REG-06 Name Contains Number",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 400', function () { pm.response.to.have.status(400); });",
+                  "const json = pm.response.json();",
+                  "pm.test('Returns VALIDATION_ERROR', function () { pm.expect(json.code).to.eql('VALIDATION_ERROR'); });",
+                  "pm.test('Validation error identifies firstName', function () { pm.expect(json.errors.some(e => e.field === 'firstName')).to.eql(true); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Mohammad1\",\n  \"lastName\": \"Tester\",\n  \"email\": \"name.number@example.com\",\n  \"password\": \"{{valid_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "TS-AUTH-REG-06 Name Contains Unsupported Symbol",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 400', function () { pm.response.to.have.status(400); });",
+                  "const json = pm.response.json();",
+                  "pm.test('Returns VALIDATION_ERROR', function () { pm.expect(json.code).to.eql('VALIDATION_ERROR'); });",
+                  "pm.test('Validation error identifies firstName', function () { pm.expect(json.errors.some(e => e.field === 'firstName')).to.eql(true); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Mohammad@\",\n  \"lastName\": \"Tester\",\n  \"email\": \"name.symbol@example.com\",\n  \"password\": \"{{valid_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "TS-AUTH-REG-07 Invalid Email Format",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 400', function () { pm.response.to.have.status(400); });",
+                  "const json = pm.response.json();",
+                  "pm.test('Returns VALIDATION_ERROR', function () { pm.expect(json.code).to.eql('VALIDATION_ERROR'); });",
+                  "pm.test('Validation error identifies email', function () { pm.expect(json.errors.some(e => e.field === 'email')).to.eql(true); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"QA\",\n  \"lastName\": \"Tester\",\n  \"email\": \"not-an-email\",\n  \"password\": \"{{valid_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "TS-AUTH-REG-08 Password Too Short",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 400', function () { pm.response.to.have.status(400); });",
+                  "const json = pm.response.json();",
+                  "pm.test('Returns VALIDATION_ERROR', function () { pm.expect(json.code).to.eql('VALIDATION_ERROR'); });",
+                  "pm.test('Validation error identifies password', function () { pm.expect(json.errors.some(e => e.field === 'password')).to.eql(true); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"QA\",\n  \"lastName\": \"Tester\",\n  \"email\": \"pwd.too.short@example.com\",\n  \"password\": \"Qa@1\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "TS-AUTH-REG-08 Password Missing Uppercase",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 400', function () { pm.response.to.have.status(400); });",
+                  "const json = pm.response.json();",
+                  "pm.test('Returns VALIDATION_ERROR', function () { pm.expect(json.code).to.eql('VALIDATION_ERROR'); });",
+                  "pm.test('Validation error identifies password', function () { pm.expect(json.errors.some(e => e.field === 'password')).to.eql(true); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"QA\",\n  \"lastName\": \"Tester\",\n  \"email\": \"pwd.no.upper@example.com\",\n  \"password\": \"qalab@12345\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "TS-AUTH-REG-08 Password Missing Lowercase",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 400', function () { pm.response.to.have.status(400); });",
+                  "const json = pm.response.json();",
+                  "pm.test('Returns VALIDATION_ERROR', function () { pm.expect(json.code).to.eql('VALIDATION_ERROR'); });",
+                  "pm.test('Validation error identifies password', function () { pm.expect(json.errors.some(e => e.field === 'password')).to.eql(true); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"QA\",\n  \"lastName\": \"Tester\",\n  \"email\": \"pwd.no.lower@example.com\",\n  \"password\": \"QALAB@12345\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "TS-AUTH-REG-08 Password Missing Number",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 400', function () { pm.response.to.have.status(400); });",
+                  "const json = pm.response.json();",
+                  "pm.test('Returns VALIDATION_ERROR', function () { pm.expect(json.code).to.eql('VALIDATION_ERROR'); });",
+                  "pm.test('Validation error identifies password', function () { pm.expect(json.errors.some(e => e.field === 'password')).to.eql(true); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"QA\",\n  \"lastName\": \"Tester\",\n  \"email\": \"pwd.no.number@example.com\",\n  \"password\": \"QaLab@Test\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "TS-AUTH-REG-08 Password Missing Special Character",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 400', function () { pm.response.to.have.status(400); });",
+                  "const json = pm.response.json();",
+                  "pm.test('Returns VALIDATION_ERROR', function () { pm.expect(json.code).to.eql('VALIDATION_ERROR'); });",
+                  "pm.test('Validation error identifies password', function () { pm.expect(json.errors.some(e => e.field === 'password')).to.eql(true); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"QA\",\n  \"lastName\": \"Tester\",\n  \"email\": \"pwd.no.special@example.com\",\n  \"password\": \"QaLab12345\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "TS-AUTH-REG-02 Reject Privileged Role Field",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 400', function () { pm.response.to.have.status(400); });",
+                  "const json = pm.response.json();",
+                  "pm.test('Returns VALIDATION_ERROR', function () { pm.expect(json.code).to.eql('VALIDATION_ERROR'); });",
+                  "pm.test('Validation error identifies role', function () { pm.expect(json.errors.some(e => e.field === 'role')).to.eql(true); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"QA\",\n  \"lastName\": \"Tester\",\n  \"email\": \"role.injection@example.com\",\n  \"password\": \"{{valid_password}}\",\n  \"role\": \"ADMIN\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Public registration must never allow caller-assigned ADMIN role."
+          },
+          "response": []
+        },
+        {
+          "name": "TS-AUTH-REG-03 Reject Status Field",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 400', function () { pm.response.to.have.status(400); });",
+                  "const json = pm.response.json();",
+                  "pm.test('Returns VALIDATION_ERROR', function () { pm.expect(json.code).to.eql('VALIDATION_ERROR'); });",
+                  "pm.test('Validation error identifies status', function () { pm.expect(json.errors.some(e => e.field === 'status')).to.eql(true); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"QA\",\n  \"lastName\": \"Tester\",\n  \"email\": \"status.injection@example.com\",\n  \"password\": \"{{valid_password}}\",\n  \"status\": \"ACTIVE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Public registration must never allow caller-assigned account status."
+          },
+          "response": []
+        },
+        {
+          "name": "TS-AUTH-REG-06 Valid Spaces Hyphen Apostrophe",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "const suffix=`${Date.now()}-${Math.floor(Math.random()*100000)}`;",
+                  "pm.environment.set('special_name_email', `qa.register.namechars.${suffix}@example.com`);"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 201', function () { pm.response.to.have.status(201); });",
+                  "const json=pm.response.json();",
+                  "pm.test('Success response matches contract', function () { pm.expect(json.message).to.eql('Registration successful. Please verify your email.'); pm.expect(json.verificationRequired).to.eql(true); });",
+                  "pm.test('No authentication tokens are issued', function () { pm.expect(json).to.not.have.property('accessToken'); pm.expect(json).to.not.have.property('refreshToken'); pm.expect(json).to.not.have.property('token'); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Mary-Jane\",\n  \"lastName\": \"O' Connor\",\n  \"email\": \"{{special_name_email}}\",\n  \"password\": \"{{valid_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Verifies allowed name separators."
+          },
+          "response": []
+        },
+        {
+          "name": "TS-AUTH-REG-06 Name Length 50 - Valid",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "const suffix=`${Date.now()}-${Math.floor(Math.random()*100000)}`;",
+                  "pm.environment.set('name50_email', `qa.register.name50.${suffix}@example.com`);"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 201', function () { pm.response.to.have.status(201); });",
+                  "const json=pm.response.json();",
+                  "pm.test('Success response matches contract', function () { pm.expect(json.message).to.eql('Registration successful. Please verify your email.'); pm.expect(json.verificationRequired).to.eql(true); });",
+                  "pm.test('No authentication tokens are issued', function () { pm.expect(json).to.not.have.property('accessToken'); pm.expect(json).to.not.have.property('refreshToken'); pm.expect(json).to.not.have.property('token'); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\n  \"lastName\": \"Tester\",\n  \"email\": \"{{name50_email}}\",\n  \"password\": \"{{valid_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Boundary: exactly 50 characters is allowed."
+          },
+          "response": []
+        },
+        {
+          "name": "TS-AUTH-REG-06 Name Length 51 - Invalid",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 400', function () { pm.response.to.have.status(400); });",
+                  "const json=pm.response.json();",
+                  "pm.test('Returns VALIDATION_ERROR', function () { pm.expect(json.code).to.eql('VALIDATION_ERROR'); });",
+                  "pm.test('Validation error identifies firstName', function () { pm.expect(json.errors.some(e => e.field === 'firstName')).to.eql(true); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\n  \"lastName\": \"Tester\",\n  \"email\": \"name51@example.com\",\n  \"password\": \"{{valid_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Boundary: 51 characters must be rejected."
+          },
+          "response": []
+        },
+        {
+          "name": "TS-AUTH-REG-06 Unsupported Script - Invalid",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 400', function () { pm.response.to.have.status(400); });",
+                  "const json=pm.response.json();",
+                  "pm.test('Returns VALIDATION_ERROR', function () { pm.expect(json.code).to.eql('VALIDATION_ERROR'); });",
+                  "pm.test('Validation error identifies firstName', function () { pm.expect(json.errors.some(e => e.field === 'firstName')).to.eql(true); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"山田\",\n  \"lastName\": \"Tester\",\n  \"email\": \"unsupported.script@example.com\",\n  \"password\": \"{{valid_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Version 1 supports Arabic or English letters only."
+          },
+          "response": []
+        },
+        {
+          "name": "TS-AUTH-REG-08 Password Length 8 - Valid",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "const suffix=`${Date.now()}-${Math.floor(Math.random()*100000)}`;",
+                  "pm.environment.set('pwd8_email', `qa.register.pwd8.${suffix}@example.com`);"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 201', function () { pm.response.to.have.status(201); });",
+                  "const json=pm.response.json();",
+                  "pm.test('Success response matches contract', function () { pm.expect(json.message).to.eql('Registration successful. Please verify your email.'); pm.expect(json.verificationRequired).to.eql(true); });",
+                  "pm.test('No authentication tokens are issued', function () { pm.expect(json).to.not.have.property('accessToken'); pm.expect(json).to.not.have.property('refreshToken'); pm.expect(json).to.not.have.property('token'); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"QA\",\n  \"lastName\": \"Tester\",\n  \"email\": \"{{pwd8_email}}\",\n  \"password\": \"Qa1@abcd\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Boundary: exactly 8 characters is allowed when complexity is satisfied."
+          },
+          "response": []
+        },
+        {
+          "name": "TS-AUTH-REG-08 Password Length 64 - Valid",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "const suffix=`${Date.now()}-${Math.floor(Math.random()*100000)}`;",
+                  "pm.environment.set('pwd64_email', `qa.register.pwd64.${suffix}@example.com`);"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 201', function () { pm.response.to.have.status(201); });",
+                  "const json=pm.response.json();",
+                  "pm.test('Success response matches contract', function () { pm.expect(json.message).to.eql('Registration successful. Please verify your email.'); pm.expect(json.verificationRequired).to.eql(true); });",
+                  "pm.test('No authentication tokens are issued', function () { pm.expect(json).to.not.have.property('accessToken'); pm.expect(json).to.not.have.property('refreshToken'); pm.expect(json).to.not.have.property('token'); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"QA\",\n  \"lastName\": \"Tester\",\n  \"email\": \"{{pwd64_email}}\",\n  \"password\": \"A1@abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Boundary: exactly 64 characters is allowed."
+          },
+          "response": []
+        },
+        {
+          "name": "TS-AUTH-REG-08 Password Length 65 - Invalid",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 400', function () { pm.response.to.have.status(400); });",
+                  "const json=pm.response.json();",
+                  "pm.test('Returns VALIDATION_ERROR', function () { pm.expect(json.code).to.eql('VALIDATION_ERROR'); });",
+                  "pm.test('Validation error identifies password', function () { pm.expect(json.errors.some(e => e.field === 'password')).to.eql(true); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"QA\",\n  \"lastName\": \"Tester\",\n  \"email\": \"pwd65@example.com\",\n  \"password\": \"A1@abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Boundary: 65 characters must be rejected."
+          },
+          "response": []
+        },
+        {
+          "name": "TECH-REG Malformed JSON Body",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 400', function () { pm.response.to.have.status(400); });",
+                  "const json=pm.response.json();",
+                  "pm.test('Malformed JSON maps to VALIDATION_ERROR', function () { pm.expect(json.code).to.eql('VALIDATION_ERROR'); pm.expect(json.errors.some(e => e.field === 'body')).to.eql(true); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"firstName\":",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Technical negative case for malformed JSON parsing."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "99 - Manual Fault Injection",
+      "description": "Excluded from the normal run. Reserved for 503 mail-delivery failure validation.",
+      "item": [
+        {
+          "name": "TS-AUTH-REG Mail Delivery Failure - Manual Fault Injection",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "const suffix = `${Date.now()}-${Math.floor(Math.random()*100000)}`;",
+                  "pm.environment.set('mail_failure_email', `qa.register.mailfail.${suffix}@example.com`);"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 503', function () { pm.response.to.have.status(503); });",
+                  "const json=pm.response.json();",
+                  "pm.test('Returns EMAIL_DELIVERY_FAILED', function () { pm.expect(json.code).to.eql('EMAIL_DELIVERY_FAILED'); });",
+                  "pm.test('Safe recovery details are returned', function () { pm.expect(json.details.accountCreated).to.eql(true); pm.expect(json.details.verificationRequired).to.eql(true); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"QA\",\n  \"lastName\": \"MailFailure\",\n  \"email\": \"{{mail_failure_email}}\",\n  \"password\": \"{{valid_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Do not run in the normal suite. Backend must already be running, then Mailpit must be deliberately stopped before sending. Start Mailpit again after the case."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
