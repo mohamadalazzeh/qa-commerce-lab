@@ -2,13 +2,13 @@
 
 ## Status
 
-**FROZEN — ready for backend planning.**
+**CONTROLLED QA ALIGNMENT REVIEW — previously frozen baseline, currently reopened for approved QA clarifications.**
 
-This document is the Version 1 source of truth for the externally observable Authentication API behavior. Backend implementation details and PostgreSQL relationships are documented separately in `docs/business-analysis/authentication-data-model-v1.0.md`.
+This document remains the Version 1 source of truth for the externally observable Authentication API behavior. Backend implementation details and PostgreSQL relationships are documented separately in `docs/business-analysis/authentication-data-model-v1.0.md`.
 
-Detailed QA Test Cases remain intentionally deferred until the backend is running and the APIs are executed through Postman, PostgreSQL, and Mailpit.
+Detailed QA Test Cases are maintained separately and are executed through Postman, PostgreSQL, and Mailpit.
 
-**Backend implementation must not begin until the backend plan is explicitly discussed with the user.**
+Change-control note (2026-10-14): requirement clarifications made after the original freeze reopened this contract for alignment. Changes in this review must be reflected consistently in Requirements, OpenAPI/Swagger, backend validation/behavior, developer tests, and QA assets before the contract is re-frozen.
 
 ---
 
@@ -25,6 +25,12 @@ JSON endpoints use:
 ```http
 Content-Type: application/json
 ```
+
+JSON request bodies are strict by default. Unexpected fields return `400 VALIDATION_ERROR` unless an endpoint explicitly documents extensible input.
+
+Unless an endpoint states otherwise, email fields used for account identification must use valid email format, must not exceed 254 characters, and are compared case-insensitively for account lookup/uniqueness.
+
+Every API operation that creates or replaces an account password uses the same Version 1 password policy: 8..64 characters with at least one uppercase English letter `A-Z`, one lowercase English letter `a-z`, one digit `0-9`, and one non-alphanumeric/non-whitespace special character. Password values are evaluated exactly as submitted; whitespace does not satisfy the special-character rule.
 
 Standard error shape:
 
@@ -51,6 +57,10 @@ Validation errors may additionally include:
 ```
 
 An error may include a small `details` object when the client needs safe recovery context. Sensitive credentials, raw tokens, OTP values, password hashes, and internal database details are never returned.
+
+Unless an endpoint explicitly defines a different public response, every error listed in this contract as `<HTTP status> <BUSINESS_CODE>` uses the standard error shape above. The HTTP status and `code` are contract-stable and may be asserted exactly by automated tests. The `message` must be non-empty, human-readable, and safe to expose, but its exact wording is not contract-stable unless a literal response body is explicitly defined. Validation-error arrays may contain one or more field errors; clients must not depend on array ordering.
+
+For cooldown-specific `429` responses, the server must include a `Retry-After` response header expressed in whole seconds when the remaining cooldown is known. General abuse/rate-limit responses should include `Retry-After` when the retry window can be calculated safely.
 
 All durations named `expiresIn` are expressed in seconds. Stored timestamps use UTC; API timestamps use ISO-8601 UTC when exposed.
 
@@ -139,6 +149,35 @@ Request:
 }
 ```
 
+Registration validation contract:
+
+```text
+firstName / lastName
+  required string
+  length = 1..50 characters
+  allowed letters = Arabic or English
+  spaces, hyphens, and apostrophes are allowed
+  any numeric character, unsupported symbol, or letter/script from another language is rejected
+
+email
+  required
+  valid email format
+  maximum length = 254 characters
+  uniqueness comparison = case-insensitive
+
+password
+  required
+  length = 8..64 characters
+  at least one uppercase English letter A-Z
+  at least one lowercase English letter a-z
+  at least one digit 0-9
+  at least one special character
+  special character = any non-alphanumeric, non-whitespace character
+  password is evaluated exactly as submitted; whitespace does not satisfy the special-character rule
+```
+
+The request body is strict. Unexpected fields are rejected with `400 VALIDATION_ERROR`.
+
 The client does not submit `role` or `status`. The backend assigns:
 
 ```text
@@ -166,19 +205,27 @@ Errors:
 ```text
 400 VALIDATION_ERROR
 409 EMAIL_ALREADY_REGISTERED
+503 EMAIL_DELIVERY_FAILED
 ```
 
 Unexpected privileged fields such as `role` or `status` are rejected with `400 VALIDATION_ERROR`.
 
 Email uniqueness is case-insensitive.
 
-If account creation and verification-token creation succeed but verification-email delivery fails, the Customer account remains `PENDING_VERIFICATION`; it is not deleted. The endpoint returns:
+If account creation and verification-token creation succeed but verification-email delivery fails, the Customer account remains `PENDING_VERIFICATION`; it is not deleted. The endpoint returns `503 EMAIL_DELIVERY_FAILED` using this recovery context:
 
-```text
-503 EMAIL_DELIVERY_FAILED
+```json
+{
+  "code": "EMAIL_DELIVERY_FAILED",
+  "message": "Account created, but the verification email could not be delivered.",
+  "details": {
+    "accountCreated": true,
+    "verificationRequired": true
+  }
+}
 ```
 
-with safe recovery context indicating that the account was created and verification is still required. The Customer can use the Resend Verification flow instead of registering again.
+The Customer must use the Resend Verification flow instead of registering again.
 
 ---
 
@@ -282,7 +329,7 @@ The 60-second cooldown is applied uniformly to syntactically valid normalized em
 Within cooldown → 429 VERIFICATION_RESEND_COOLDOWN
 ```
 
-`Retry-After` is included where practical.
+`Retry-After` is required for this cooldown response and contains the remaining cooldown in whole seconds.
 
 ### 6.2 Expired-token flow
 
@@ -345,12 +392,15 @@ Request:
 Security precedence:
 
 ```text
+Malformed/missing request fields        → 400 VALIDATION_ERROR
+Applicable request rate limit exceeded  → 429 RATE_LIMIT_EXCEEDED
 Unknown email / wrong password          → always 401 INVALID_CREDENTIALS
 Correct password + PENDING_VERIFICATION → 403 EMAIL_VERIFICATION_REQUIRED
 Correct password + DISABLED             → 403 ACCOUNT_DISABLED
 Correct password + active temp lock     → 423 ACCOUNT_LOCKED
-Applicable request rate limit exceeded  → 429 RATE_LIMIT_EXCEEDED
 ```
+
+When an applicable request rate limit has already been exceeded, `429 RATE_LIMIT_EXCEEDED` takes precedence over credential and account-state outcomes.
 
 Wrong credentials do not disclose whether an account exists, is pending, disabled, or temporarily locked.
 
@@ -387,7 +437,7 @@ Set-Cookie: refreshToken=<opaque>; HttpOnly; ...
 }
 ```
 
-Normal Customer Login does not require OTP in V1.
+Normal Customer Login does not require OTP in the currently contracted V1 flow. Optional Customer 2FA is a known uncovered requirement and is listed in the Contract Coverage Gaps section below; it must not be inferred from the Admin OTP endpoints.
 
 ### 7.2 Admin first-factor success
 
@@ -447,6 +497,8 @@ Errors:
 423 OTP_CHALLENGE_LOCKED
 409 OTP_CHALLENGE_ALREADY_USED
 ```
+
+Malformed or missing `challengeId` / `otp` fields return `400 VALIDATION_ERROR`. A well-formed but unknown or revoked challenge, or a wrong OTP for a known challenge, returns `401 INVALID_OTP`. A known challenge whose OTP lifetime has elapsed returns `401 OTP_EXPIRED`.
 
 Each wrong OTP increments the challenge attempt counter. The fifth wrong OTP invalidates only the OTP challenge; it does not disable or password-lock the Admin account. The Admin must restart full Login to obtain a new challenge.
 
@@ -525,7 +577,18 @@ attempt_count                 → unchanged
 Used/revoked/locked challenge → cannot be revived
 ```
 
-Invalid or unavailable challenge state returns a stable challenge-related error without issuing a code. Confirmed email-delivery failure returns `503 OTP_DELIVERY_FAILED` and does not create a usable authentication session.
+Errors:
+
+```text
+400 VALIDATION_ERROR
+400 INVALID_OTP_CHALLENGE
+409 OTP_CHALLENGE_ALREADY_USED
+423 OTP_CHALLENGE_LOCKED
+429 OTP_RESEND_COOLDOWN
+503 OTP_DELIVERY_FAILED
+```
+
+Unknown, revoked, or expired challenge identifiers return `400 INVALID_OTP_CHALLENGE`. Used or locked challenges return their specific state errors above and cannot be revived. Confirmed email-delivery failure returns `503 OTP_DELIVERY_FAILED` and does not create a usable authentication session.
 
 ---
 
@@ -572,7 +635,7 @@ Errors:
 409 PASSWORD_CHANGE_NOT_REQUIRED
 ```
 
-The `passwordChangeToken` is one-time and valid for 10 minutes. It cannot authorize normal Admin endpoints.
+The `passwordChangeToken` is one-time and valid for 10 minutes. Missing request fields return `400 VALIDATION_ERROR`. Unknown, expired, revoked, or already-consumed restricted tokens return `401 INVALID_PASSWORD_CHANGE_TOKEN`. It cannot authorize normal Admin endpoints.
 
 ---
 
@@ -601,12 +664,13 @@ Set-Cookie: refreshToken=<new-opaque-token>; HttpOnly; ...
 Rules:
 
 ```text
-Valid Refresh Token      → rotate token and issue new Access Token
-Old rotated token        → unusable immediately
-Detected token reuse     → 401 INVALID_REFRESH_TOKEN + revoke associated session
-Expired/invalid token    → 401 INVALID_REFRESH_TOKEN
-Revoked session          → 401 INVALID_REFRESH_TOKEN
-DISABLED account         → 403 ACCOUNT_DISABLED + revoke session
+Valid Refresh Token           → rotate token and issue new Access Token
+Missing Refresh cookie        → 401 INVALID_REFRESH_TOKEN
+Old rotated token             → unusable immediately
+Detected token reuse          → 401 INVALID_REFRESH_TOKEN + revoke associated session
+Expired/invalid token         → 401 INVALID_REFRESH_TOKEN
+Revoked session               → 401 INVALID_REFRESH_TOKEN
+DISABLED account              → 403 ACCOUNT_DISABLED + revoke session
 ```
 
 No password or Admin OTP is required for ordinary Access Token refresh inside a still-valid authenticated session.
@@ -659,7 +723,7 @@ Public response:
 }
 ```
 
-The public response is the same for:
+Malformed or missing email input returns `400 VALIDATION_ERROR`. For syntactically valid email input, the public response is the same for:
 
 ```text
 ACTIVE Customer
@@ -667,10 +731,13 @@ ACTIVE Admin
 PENDING_VERIFICATION Customer
 DISABLED account
 unknown email
+per-email cooldown
 confirmed delivery failure
 ```
 
-Only eligible accounts receive an actual recovery challenge/email. Resetting a `PENDING_VERIFICATION` Customer password does not activate the account.
+Eligible accounts are `ACTIVE` Customers, `ACTIVE` Admins, and `PENDING_VERIFICATION` Customers. `DISABLED` and unknown accounts do not receive a recovery challenge. The 60-second OTP-request cooldown is applied without changing the public response so account existence is not exposed. General source-IP abuse protection may independently return `429 RATE_LIMIT_EXCEEDED`.
+
+Resetting a `PENDING_VERIFICATION` Customer password does not activate the account.
 
 ---
 
@@ -710,7 +777,7 @@ New OTP validity          → 5 minutes
 attempt_count             → unchanged
 ```
 
-Eligible, unknown, disabled, per-account-cooldown, and confirmed delivery-failure states receive the same public response. General source-IP abuse protection may independently return `429 RATE_LIMIT_EXCEEDED`.
+Malformed or missing email input returns `400 VALIDATION_ERROR`. Eligible, unknown, disabled, per-account-cooldown, and confirmed delivery-failure states receive the same public response. The 60-second per-email cooldown is therefore not exposed as a distinct business error. General source-IP abuse protection may independently return `429 RATE_LIMIT_EXCEEDED`.
 
 ---
 
@@ -740,7 +807,9 @@ Newest OTP only        = yes
 Resend resets attempts = no
 ```
 
-To avoid turning recovery state into an account-enumeration channel, wrong, unknown-email, expired, revoked, used, or exhausted recovery challenges use the same externally visible authentication failure:
+Malformed or missing `email` / `otp` fields, including an OTP that is not exactly six digits, return `400 VALIDATION_ERROR`.
+
+To avoid turning recovery state into an account-enumeration channel, a well-formed six-digit OTP that is wrong, associated with an unknown email, expired, revoked, used, or exhausted uses the same externally visible authentication failure:
 
 ```text
 401 INVALID_OTP
@@ -802,6 +871,8 @@ Errors:
 409 RESET_TOKEN_ALREADY_USED
 ```
 
+Missing/malformed request fields return `400 VALIDATION_ERROR`. A well-formed Reset Token that is unknown, expired, or revoked returns `401 INVALID_RESET_TOKEN`. A known token that has already been successfully consumed returns `409 RESET_TOKEN_ALREADY_USED`.
+
 V1 does not maintain full password history; only reuse of the current password is rejected.
 
 An Admin still completes the normal Admin email-OTP step on the next full Login.
@@ -818,6 +889,16 @@ Authorization: Bearer <admin-access-token>
 ```
 
 Only authenticated Admins may use this endpoint.
+
+Query contract:
+
+```text
+status    = optional; one of PENDING, EXPIRED, USED, CANCELLED
+page      = optional; integer >= 1; default 1
+pageSize  = optional; integer 1..100; default 20
+```
+
+Unknown query parameters or invalid query values return `400 VALIDATION_ERROR`.
 
 Success:
 
@@ -864,8 +945,8 @@ Errors:
 
 ```text
 400 VALIDATION_ERROR
-401 unauthenticated
-403 authenticated but not ADMIN
+401 AUTHENTICATION_REQUIRED
+403 ADMIN_ACCESS_REQUIRED
 ```
 
 ---
@@ -907,8 +988,8 @@ Errors:
 
 ```text
 400 VALIDATION_ERROR
-401 unauthenticated
-403 authenticated but not ADMIN
+401 AUTHENTICATION_REQUIRED
+403 ADMIN_ACCESS_REQUIRED
 409 ADMIN_ALREADY_EXISTS
 409 ADMIN_INVITATION_ALREADY_PENDING
 409 ADMIN_INVITATION_REQUIRES_RESEND
@@ -920,10 +1001,12 @@ Rules:
 
 ```text
 Maximum one active PENDING invitation per email
+Existing active PENDING invitation → 409 ADMIN_INVITATION_ALREADY_PENDING
+Existing EXPIRED invitation that can be resent → 409 ADMIN_INVITATION_REQUIRES_RESEND
 Existing ACTIVE Customer → invitation linked to same user_id; role remains CUSTOMER until acceptance
 Existing PENDING_VERIFICATION Customer → promotion not allowed
 Existing DISABLED Customer → promotion not allowed
-Already ADMIN → no invitation
+Already ADMIN → no invitation / 409 ADMIN_ALREADY_EXISTS
 Cancelled historical invitation → does not block a fresh invitation
 ```
 
@@ -950,6 +1033,13 @@ Success:
   "message": "Admin invitation resent successfully.",
   "expiresIn": 86400
 }
+```
+
+Authorization errors:
+
+```text
+401 AUTHENTICATION_REQUIRED
+403 ADMIN_ACCESS_REQUIRED
 ```
 
 Rules/errors:
@@ -992,6 +1082,13 @@ Success:
 }
 ```
 
+Authorization errors:
+
+```text
+401 AUTHENTICATION_REQUIRED
+403 ADMIN_ACCESS_REQUIRED
+```
+
 Behavior/errors:
 
 ```text
@@ -1021,6 +1118,12 @@ Request:
 }
 ```
 
+Success:
+
+```text
+200 OK
+```
+
 Valid new-person invitation:
 
 ```json
@@ -1044,6 +1147,7 @@ No email or private account details are returned.
 Errors:
 
 ```text
+400 VALIDATION_ERROR
 400 INVALID_ADMIN_INVITATION_TOKEN
 400 ADMIN_INVITATION_EXPIRED
 409 ADMIN_INVITATION_ALREADY_USED
@@ -1136,9 +1240,10 @@ Errors:
 409 ADMIN_INVITATION_CANCELLED
 409 ADMIN_PROMOTION_NOT_ALLOWED
 409 ADMIN_ALREADY_EXISTS
+409 ADMIN_INVITATION_STATE_CHANGED
 ```
 
-At acceptance time, the backend re-resolves the invitation email and current account state. If the invitation meaning changed between Inspect and Accept (for example, a formerly-new email became an existing Customer), the backend must never overwrite the Customer password/profile. It either safely applies promotion semantics when the request is compatible or rejects the stale request so the client can re-inspect and retry with the correct flow.
+At acceptance time, the backend re-resolves the invitation email and current account state. If the invitation meaning changed between Inspect and Accept (for example, a formerly-new email became an existing Customer), the backend must never overwrite the Customer password/profile and must reject the stale request with `409 ADMIN_INVITATION_STATE_CHANGED`. The client must re-inspect the invitation and retry using the currently valid flow.
 
 Two simultaneous acceptance requests cannot both create/promote the same user.
 
@@ -1152,7 +1257,10 @@ Two simultaneous acceptance requests cannot both create/promote the same user.
 PENDING_VERIFICATION → may not establish normal Login session
 ACTIVE               → normal role-specific authentication allowed
 DISABLED             → may not Login or Refresh
+Transition to DISABLED → revoke all active sessions and Refresh Tokens for that account
 ```
+
+Disabling an account must take effect for authorization without waiting for the previous Access Token's normal expiry; an already-issued Access Token for a now-`DISABLED` account must not continue to authorize protected operations.
 
 A Password Reset does not activate a pending Customer.
 
@@ -1189,6 +1297,24 @@ A concurrent duplicate request may not succeed twice.
 
 ---
 
+## 25.1 Contract Coverage Gaps Requiring Product/API Decision
+
+The following approved Version 1 requirements are not yet fully represented by concrete endpoints in this Authentication contract and must not be treated as implemented merely because related state rules exist:
+
+```text
+REQ-AUTH-031  Optional Customer 2FA
+  Missing: Customer 2FA enrollment/enablement, verification during Login, recovery/disable behavior, and API endpoints.
+
+REQ-AUTH-033  Administrator disable/re-enable Customer account
+  Missing: Administrative account-status endpoint(s), request/response contract, authorization/error behavior, and explicit re-enable semantics.
+```
+
+`REQ-AUTH-021` already requires disabling an account to invalidate active sessions/tokens. When the administrative disable/re-enable endpoint is designed, it must preserve that rule.
+
+These are documented gaps, not inferred behavior. They must be resolved by an explicit product/API decision before this contract is re-frozen as complete Version 1 coverage.
+
+---
+
 ## 26. OpenAPI / Swagger Alignment Outcome
 
 No separate frozen OpenAPI YAML/JSON document existed before this consistency review. Therefore this Version 1 contract is the authoritative input for the backend's OpenAPI/Swagger definition.
@@ -1205,13 +1331,13 @@ cookie/Bearer-token behavior
 public generic-response behavior
 ```
 
-A mismatch between implementation/OpenAPI and this frozen contract is treated as a contract defect and must be resolved before the Authentication API is considered ready for QA execution.
+A mismatch between implementation/OpenAPI and this authoritative contract is treated as a contract defect and must be resolved before the Authentication API is considered aligned for QA execution.
 
 ---
 
-## 27. Final Review Outcome
+## 27. Review Outcome
 
-The final pre-backend consistency review checked:
+The original pre-backend consistency review checked:
 
 ```text
 Endpoint inventory                     ✅
@@ -1219,8 +1345,8 @@ Request direction                      ✅
 Success responses                      ✅
 HTTP status / business-code direction  ✅
 Account-enumeration behavior           ✅
-Customer/Admin state transitions       ✅
-OTP flows                              ✅
+Customer/Admin state transitions       ✅ (except missing Admin disable/re-enable endpoint contract)
+OTP flows                              ✅ (Admin OTP defined; optional Customer 2FA contract still missing)
 Refresh / Logout                       ✅
 Password Recovery                      ✅
 Admin Invitation / Promotion           ✅
@@ -1240,6 +1366,20 @@ Defined repeated/used Email Verification behavior.
 Defined recoverable email-delivery-failure behavior without silently deleting created resources.
 ```
 
-**Authentication API Contract v1.0 is frozen.**
+Current QA alignment additions (2026-10-14):
 
-Next step is not backend implementation yet. Stop and discuss the backend architecture/implementation plan with the user first.
+```text
+Aligned Registration validation with approved name/email/password requirements.
+Defined exact Registration 503 recovery details.
+Clarified stable error-code vs human-readable-message expectations.
+Made cooldown Retry-After behavior testable.
+Clarified Admin OTP resend/invalid-challenge outcomes.
+Clarified Password Recovery validation and eligibility behavior.
+Standardized Admin invitation authorization error codes and list pagination rules.
+Made stale Admin-invitation acceptance deterministic.
+Documented missing Optional Customer 2FA and Admin disable/re-enable endpoint coverage.
+```
+
+**Authentication API Contract v1.0 is under controlled QA alignment review and is not currently re-frozen.**
+
+Next alignment step: reconcile this clarified contract with the approved Requirements, OpenAPI/Swagger, backend behavior, developer tests, and QA assets. Resolve the documented Contract Coverage Gaps before declaring complete Version 1 Authentication coverage.
