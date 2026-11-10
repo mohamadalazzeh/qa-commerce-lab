@@ -1,74 +1,50 @@
 # QA Commerce Lab
 
-**Real-World API & Database Testing Project**
+**Manual QA & API Testing Portfolio | SaaS-style E-commerce Backend**
 
-QA Commerce Lab is a hands-on quality engineering project built around an e-commerce backend. The project focuses on requirement analysis, API testing, database validation, defect reporting, regression testing, and later test automation and CI/CD.
+QA Commerce Lab is a practical, non-production project demonstrating the software testing lifecycle: analyzing requirements, reviewing an API contract, designing positive/negative/boundary tests, running API checks, validating PostgreSQL state, documenting defects and building regression coverage.
 
-## Project Scope
+## Portfolio Case Study
 
-The system covers the following business areas:
+**[Customer Registration API — QA Case Study (evidence in progress)](portfolio/registration-case-study.md)**
 
-- Authentication and JWT-based access
-- Customer and administrator roles
-- Products and inventory
-- Orders and ownership rules
-- Discounts, VAT, totals, and decimal precision
-- Invoices
-- Bulk imports using CSV, Excel, and JSON
-- Database validation and data reconciliation
-- API authorization and BOLA/IDOR scenarios
+The first implemented endpoint is `POST /api/v1/auth/register`. The Registration API is code-complete according to the project's development checkpoint. The Postman collection and SQL queries are ready; a completed, evidenced manual Postman execution run is still pending.
 
-## QA Workflow
+This distinction is intentional: prepared test cases are not reported as executed test results.
 
-The project follows a sprint-based QA workflow:
+## Current Scope
 
-1. Requirement review
-2. User story and acceptance criteria analysis
-3. API contract review
-4. Test condition identification
-5. Test case design
-6. API and database test execution
-7. Defect reporting
-8. Retesting and regression testing
-9. Automation and CI/CD integration
+| Area | Status |
+| --- | --- |
+| Requirements, business rules and acceptance criteria | Documented |
+| Authentication API contract and data model | Documented |
+| Registration endpoint and underlying PostgreSQL schema | Implemented |
+| Registration-focused developer automated tests | Present in repository |
+| Postman Registration collection | Prepared: 26 normal requests and 1 isolated mail-failure request |
+| SQL database validation | Prepared |
+| Completed manual Registration run and redacted evidence | Pending |
+| Other Authentication workflows | Designed; not claimed as implemented here |
+| Products, Orders, Invoices and other commerce features | Future scope |
 
-## Current Phase
+## Explore the QA Work
 
-**Sprint 0 — Discovery & Test Analysis**
+- [Portfolio case study](portfolio/registration-case-study.md)
+- [Requirements](docs/requirements/product-requirements-v1.0.md)
+- [Business rules and workflows](docs/business-analysis/business-rules-and-workflows-v1.0.md)
+- [User stories and acceptance criteria](docs/business-analysis/user-stories-and-acceptance-criteria-v1.0.md)
+- [Authentication API contract](api-contract/authentication-api-contract-v1.0.md)
+- [QA test scenarios](qa/test-scenarios/authentication-test-scenarios-v1.0.md)
+- [Postman collection and instructions](qa/postman/README.md)
+- [SQL validation queries](qa/sql/registration-validation.sql)
+- [Developer test suite](backend/tests/auth)
+- [Current development checkpoint](docs/project-management/current-checkpoint.md)
 
-Current focus:
+## Technology
 
-- System understanding
-- Requirements review
-- User stories and acceptance criteria
-- Requirement questions and risk identification
-- API contract review preparation
+TypeScript, Node.js, Express, REST APIs, PostgreSQL, Redis, Mailpit, Docker Compose, Postman, SQL, Vitest and OpenAPI/Swagger.
 
-API execution in Postman starts after the Sprint 0 analysis activities are completed.
+## Project Evolution
 
-## Repository Structure
+The broader application aims to cover authentication, products, inventory, orders, discounts, tax calculations and invoicing. These are a roadmap, **not a claim that each feature has been implemented or tested**.
 
-```text
-qa-commerce-lab/
-├── docs/
-│   ├── project-overview/
-│   ├── requirements/
-│   └── sprints/
-├── qa/
-│   ├── requirement-review/
-│   ├── test-analysis/
-│   ├── test-cases/
-│   ├── defects/
-│   └── reports/
-├── api-contract/
-├── postman/
-├── sql/
-├── automation/
-└── .github/workflows/
-```
-
-Folders will be added as the project progresses so the repository reflects the actual QA lifecycle rather than an empty template.
-
-## Project Status
-
-`Sprint 0 — In Progress`
+This repository is an educational lab and portfolio example, not a deployed client system. No real customer credentials or production data should be published.
